@@ -5,6 +5,8 @@ import sqlite3
 DB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data')
 DB_PATH = os.path.join(DB_DIR, 'account.db')
 
+DEFAULT_BOOKKEEPER = '旺仔爹地'
+
 DEFAULT_CATEGORIES = [
     '餐饮美食', '交通出行', '日用百货', '充值缴费', '医疗健康', '文化休闲',
     '服饰装扮', '数码电器', '家居家装', '生活服务', '人情往来', '其他',
@@ -55,6 +57,7 @@ CREATE TABLE IF NOT EXISTS transactions (
     amount           REAL NOT NULL,           -- 有效金额（退款冲减后）
     refund_amount    REAL NOT NULL DEFAULT 0,
     pay_method       TEXT DEFAULT '',
+    bookkeeper       TEXT DEFAULT '',         -- 记账人
     category_id      INTEGER REFERENCES categories(id),  -- NULL = 待分类
     manual           INTEGER NOT NULL DEFAULT 0,         -- 1 = 用户手动指定过分类，重新归类时不覆盖
     alipay_category  TEXT DEFAULT ''                     -- 支付宝账单自带分类，留作重新归类
@@ -75,6 +78,11 @@ def init_db():
     os.makedirs(DB_DIR, exist_ok=True)
     conn = get_db()
     conn.executescript(SCHEMA)
+    # 迁移：旧库补充 bookkeeper 列，并把存量交易记账人填为默认值
+    cols = [r['name'] for r in conn.execute('PRAGMA table_info(transactions)')]
+    if 'bookkeeper' not in cols:
+        conn.execute("ALTER TABLE transactions ADD COLUMN bookkeeper TEXT DEFAULT ''")
+        conn.execute('UPDATE transactions SET bookkeeper=?', (DEFAULT_BOOKKEEPER,))
     for name in DEFAULT_CATEGORIES:
         conn.execute('INSERT OR IGNORE INTO categories(name) VALUES (?)', (name,))
     # 类别齐了才补种子规则（规则依赖类别 id）

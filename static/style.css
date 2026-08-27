@@ -64,6 +64,7 @@ th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #eef0f2; 
 th { font-size: 12px; color: #8a959c; font-weight: 500; white-space: nowrap; }
 tr:hover td { background: #fafbfc; }
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+th.bookkeeper, td.bookkeeper { width: 5em; white-space: nowrap; }
 .text-muted { color: #9aa4ab; }
 .small { font-size: 12px; }
 

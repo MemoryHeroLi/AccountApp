@@ -7,7 +7,7 @@ from flask import Flask, jsonify, render_template, request
 
 import classifier
 import importers
-from db import get_db
+from db import DEFAULT_BOOKKEEPER, get_db
 
 SOURCE_NAMES = {'wechat': '微信', 'alipay': '支付宝', 'manual': '手动'}
 
@@ -69,11 +69,11 @@ def create_app():
             cur = conn.execute(
                 'INSERT OR IGNORE INTO transactions'
                 '(order_no, source, tx_time, counterparty, description, amount,'
-                ' refund_amount, pay_method, category_id, alipay_category)'
-                ' VALUES (?,?,?,?,?,?,?,?,?,?)',
+                ' refund_amount, pay_method, category_id, bookkeeper, alipay_category)'
+                ' VALUES (?,?,?,?,?,?,?,?,?,?,?)',
                 (tx['order_no'], source, tx['tx_time'], tx['counterparty'],
                  tx['description'], tx['amount'], tx['refund_amount'],
-                 tx['pay_method'], cid, tx['alipay_category']))
+                 tx['pay_method'], cid, DEFAULT_BOOKKEEPER, tx['alipay_category']))
             imported += cur.rowcount
         conn.commit()
         conn.close()
@@ -89,10 +89,14 @@ def create_app():
             "ORDER BY 1 DESC")]
         categories = [dict(r) for r in conn.execute(
             'SELECT id, name FROM categories ORDER BY id')]
+        bookkeepers = [r[0] for r in conn.execute(
+            "SELECT DISTINCT bookkeeper FROM transactions "
+            "WHERE bookkeeper != '' ORDER BY 1")]
         pending = conn.execute(
             'SELECT COUNT(*) FROM transactions WHERE category_id IS NULL').fetchone()[0]
         conn.close()
-        return jsonify({'months': months, 'categories': categories, 'pending': pending})
+        return jsonify({'months': months, 'categories': categories,
+                        'bookkeepers': bookkeepers, 'pending': pending})
 
     # ---------------- 交易明细 ----------------
     @app.get('/api/transactions')
@@ -100,6 +104,7 @@ def create_app():
         month = request.args.get('month', '').strip()
         category = request.args.get('category', '').strip()
         source = request.args.get('source', '').strip()
+        bookkeeper = request.args.get('bookkeeper', '').strip()
         q = request.args.get('q', '').strip()
 
         sql = ('SELECT t.*, c.name AS category_name FROM transactions t '
@@ -116,6 +121,9 @@ def create_app():
         if source:
             sql += ' AND t.source = ?'
             params.append(source)
+        if bookkeeper:
+            sql += ' AND t.bookkeeper = ?'
+            params.append(bookkeeper)
         if q:
             sql += ' AND (t.counterparty LIKE ? OR t.description LIKE ?)'
             params.extend([f'%{q}%'] * 2)
@@ -139,14 +147,16 @@ def create_app():
         except (KeyError, ValueError, TypeError):
             return jsonify({'error': '请填写正确的日期和金额'}), 400
         conn = get_db()
+        bookkeeper = (d.get('bookkeeper') or '').strip() or DEFAULT_BOOKKEEPER
         conn.execute(
             'INSERT INTO transactions(order_no, source, tx_time, counterparty,'
-            ' description, amount, pay_method, category_id, manual)'
-            ' VALUES (?,?,?,?,?,?,?,?,1)',
+            ' description, amount, pay_method, category_id, bookkeeper, manual)'
+            ' VALUES (?,?,?,?,?,?,?,?,?,1)',
             ('M-' + uuid.uuid4().hex[:16], 'manual', tx_date, '',
              d.get('description', '').strip(), amount,
              d.get('pay_method', '').strip(),
-             int(d['category_id']) if d.get('category_id') else None))
+             int(d['category_id']) if d.get('category_id') else None,
+             bookkeeper))
         conn.commit()
         conn.close()
         return jsonify({'ok': True})
@@ -181,13 +191,14 @@ def create_app():
             conn.close()
             return jsonify({'error': '金额不能为负'}), 400
         category_id = int(d['category_id']) if d.get('category_id') else None
+        bookkeeper = d['bookkeeper'].strip() if 'bookkeeper' in d else row['bookkeeper']
         conn.execute(
             'UPDATE transactions SET tx_time=?, amount=?, description=?,'
-            ' pay_method=?, category_id=?, manual=1 WHERE id=?',
+            ' pay_method=?, category_id=?, bookkeeper=?, manual=1 WHERE id=?',
             (tx_time, amount,
              d['description'] if 'description' in d else row['description'],
              d['pay_method'] if 'pay_method' in d else row['pay_method'],
-             category_id, tx_id))
+             category_id, bookkeeper, tx_id))
         # 勾选“同时添加规则”：该关键词今后自动归入所选类别
         if d.get('add_rule') and d.get('rule_keyword'):
             cat = conn.execute('SELECT id FROM categories WHERE id=?',

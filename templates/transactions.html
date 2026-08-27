@@ -14,6 +14,7 @@
       <option value="alipay">支付宝</option>
       <option value="manual">手动记账</option>
     </select>
+    <select id="f-bookkeeper"><option value="">全部记账人</option></select>
     <input type="text" id="f-q" placeholder="搜索对方 / 商品说明" style="width:180px">
     <button class="btn" id="btn-search">查询</button>
     <div class="spacer"></div>
@@ -27,7 +28,7 @@
     <thead>
       <tr>
         <th>时间</th><th>来源</th><th>交易对方</th><th>商品说明</th>
-        <th>类别</th><th class="num">金额</th><th>支付方式</th><th>操作</th>
+        <th>类别</th><th class="num">金额</th><th>支付方式</th><th class="bookkeeper">记账人</th><th>操作</th>
       </tr>
     </thead>
     <tbody id="tx-body"></tbody>
@@ -42,6 +43,7 @@
     <div class="form-row"><label>金额 *</label><input type="number" id="add-amount" step="0.01" min="0.01"></div>
     <div class="form-row"><label>类别</label><select id="add-category"></select></div>
     <div class="form-row"><label>支付方式（可选，如“现金”）</label><input type="text" id="add-pay"></div>
+    <div class="form-row"><label>记账人</label><input type="text" id="add-bookkeeper" value="旺仔爹地"></div>
     <div class="form-row"><label>描述（可选）</label><input type="text" id="add-desc"></div>
     <div class="actions">
       <button class="btn" onclick="closeModal('modal-add')">取消</button>
@@ -58,6 +60,7 @@
     <div class="form-row"><label>金额</label><input type="number" id="edit-amount" step="0.01" min="0"></div>
     <div class="form-row"><label>类别</label><select id="edit-category"></select></div>
     <div class="form-row"><label>支付方式</label><input type="text" id="edit-pay"></div>
+    <div class="form-row"><label>记账人</label><input type="text" id="edit-bookkeeper"></div>
     <div class="form-row"><label>描述</label><input type="text" id="edit-desc"></div>
     <div class="form-row check">
       <input type="checkbox" id="edit-add-rule">
@@ -91,6 +94,8 @@ async function loadMeta() {
     meta.months.map(m => `<option value="${m}" ${m === curMonth ? 'selected' : ''}>${m}</option>`).join('');
   $('f-category').innerHTML = '<option value="">全部类别</option><option value="none">待分类</option>' +
     meta.categories.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
+  $('f-bookkeeper').innerHTML = '<option value="">全部记账人</option>' +
+    meta.bookkeepers.map(b => `<option value="${esc(b)}">${esc(b)}</option>`).join('');
   const catOpts = '<option value="">待分类</option>' +
     meta.categories.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
   $('add-category').innerHTML = catOpts;
@@ -114,7 +119,8 @@ async function loadMeta() {
 async function load() {
   const qs = new URLSearchParams({
     month: $('f-month').value, category: $('f-category').value,
-    source: $('f-source').value, q: $('f-q').value,
+    source: $('f-source').value, bookkeeper: $('f-bookkeeper').value,
+    q: $('f-q').value,
   });
   const data = await api('/api/transactions?' + qs);
   $('summary').textContent = data.count ? `共 ${data.count} 笔，合计 ${money(data.total)}` : '';
@@ -127,11 +133,12 @@ async function load() {
       <td>${categoryBadge(t)}</td>
       <td class="num">${amountCell(t)}${t.refund_amount > 0 ? ' <span class="badge refund">退款</span>' : ''}</td>
       <td class="small text-muted">${esc(t.pay_method) || '-'}</td>
+      <td class="small bookkeeper">${esc(t.bookkeeper) || '-'}</td>
       <td style="white-space:nowrap">
         <button class="btn-link" onclick="openEdit(${t.id})">编辑</button>
         <button class="btn-link danger" onclick="delTx(${t.id})">删除</button>
       </td>
-    </tr>`).join('') || '<tr><td colspan="8" class="text-muted" style="text-align:center;padding:30px">暂无交易，点击右上角“导入账单”开始</td></tr>';
+    </tr>`).join('') || '<tr><td colspan="9" class="text-muted" style="text-align:center;padding:30px">暂无交易，点击右上角“导入账单”开始</td></tr>';
 }
 
 window.openEdit = async id => {
@@ -141,6 +148,7 @@ window.openEdit = async id => {
   $('edit-amount').value = (tx.amount + tx.refund_amount).toFixed(2);
   $('edit-category').value = tx.category_id || '';
   $('edit-pay').value = tx.pay_method;
+  $('edit-bookkeeper').value = tx.bookkeeper || '';
   $('edit-desc').value = tx.description;
   $('edit-add-rule').checked = false;
   $('edit-keyword').value = tx.counterparty || '';
@@ -192,6 +200,7 @@ $('btn-add-save').onclick = async () => {
       amount: $('add-amount').value,
       category_id: $('add-category').value,
       pay_method: $('add-pay').value,
+      bookkeeper: $('add-bookkeeper').value,
       description: $('add-desc').value,
     }});
     closeModal('modal-add');
@@ -207,6 +216,7 @@ $('btn-edit-save').onclick = async () => {
       amount: $('edit-amount').value,
       category_id: $('edit-category').value,
       pay_method: $('edit-pay').value,
+      bookkeeper: $('edit-bookkeeper').value,
       description: $('edit-desc').value,
       add_rule: $('edit-add-rule').checked ? 1 : '',
       rule_keyword: $('edit-keyword').value,
