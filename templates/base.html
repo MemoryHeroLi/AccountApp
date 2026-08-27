@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}记账本{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<nav class="topbar">
+  <div class="brand">📒 记账本</div>
+  <div class="nav-links">
+    <a href="/" class="{{ 'active' if active == 'transactions' }}">交易明细</a>
+    <a href="/calendar" class="{{ 'active' if active == 'calendar' }}">消费日历</a>
+    <a href="/stats" class="{{ 'active' if active == 'stats' }}">统计分析</a>
+    <a href="/rules" class="{{ 'active' if active == 'rules' }}">分类规则</a>
+    <a href="/categories" class="{{ 'active' if active == 'categories' }}">类别管理</a>
+  </div>
+</nav>
+<main>
+{% block content %}{% endblock %}
+</main>
+{% block scripts %}{% endblock %}
+</body>
+</html>

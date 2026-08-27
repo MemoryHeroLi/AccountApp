@@ -1,0 +1,69 @@
+{% extends 'base.html' %}
+{% block title %}类别管理 - 记账本{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="page-title">类别管理</div>
+  <div class="filters">
+    <input type="text" id="c-name" placeholder="新类别名称" style="width:180px">
+    <button class="btn btn-primary" id="btn-add-cat">+ 添加类别</button>
+  </div>
+
+  <table>
+    <thead><tr><th>类别</th><th class="num">交易笔数</th><th>操作</th></tr></thead>
+    <tbody id="cats-body"></tbody>
+  </table>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+<script>
+const $ = id => document.getElementById(id);
+let renamingId = null;
+
+async function load() {
+  const data = await api('/api/categories');
+  $('cats-body').innerHTML = data.categories.map(c => `
+    <tr>
+      <td><span class="badge" style="background:${categoryColor(c.name)}1a;color:${categoryColor(c.name)};font-size:13px">${esc(c.name)}</span></td>
+      <td class="num">${c.cnt}</td>
+      <td style="white-space:nowrap">
+        <button class="btn-link" onclick="renameCat(${c.id},'${esc(c.name)}')">重命名</button>
+        <button class="btn-link danger" onclick="delCat(${c.id},${c.cnt})">删除</button>
+      </td>
+    </tr>`).join('');
+}
+
+window.renameCat = async (id, name) => {
+  const newName = prompt('新的类别名称：', name);
+  if (newName === null) return;
+  try {
+    await api('/api/category/' + id, { method: 'POST', body: { name: newName } });
+    toast('已重命名');
+    load();
+  } catch (err) { toast(err.message, true); }
+};
+
+window.delCat = async (id, cnt) => {
+  if (cnt > 0) { toast('仍有交易使用该类别，无法删除', true); return; }
+  if (!confirm('确定删除该类别？')) return;
+  try {
+    await api('/api/category/' + id, { method: 'DELETE' });
+    toast('已删除');
+    load();
+  } catch (err) { toast(err.message, true); }
+};
+
+$('btn-add-cat').onclick = async () => {
+  if (!$('c-name').value.trim()) { toast('请输入类别名称', true); return; }
+  try {
+    await api('/api/categories', { method: 'POST', body: { name: $('c-name').value } });
+    $('c-name').value = '';
+    toast('已添加');
+    load();
+  } catch (err) { toast(err.message, true); }
+};
+
+load();
+</script>
+{% endblock %}

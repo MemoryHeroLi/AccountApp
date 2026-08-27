@@ -1,0 +1,139 @@
+{% extends 'base.html' %}
+{% block title %}统计分析 - 记账本{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="page-title">统计分析</div>
+  <div class="filters">
+    <label>起始月份</label>
+    <select id="s-start"></select>
+    <label>结束月份</label>
+    <select id="s-end"></select>
+    <button class="btn btn-primary" id="btn-query">查询</button>
+    <div class="spacer"></div>
+    <span class="small text-muted" id="stats-range"></span>
+  </div>
+</div>
+
+<div class="grid-2">
+  <div class="card"><div class="chart-title">月度消费对比</div><div id="chart-monthly" class="chart"></div></div>
+  <div class="card"><div class="chart-title">月度趋势（含 3 月均线）</div><div id="chart-trend" class="chart"></div></div>
+  <div class="card"><div class="chart-title">类别占比</div><div id="chart-category" class="chart"></div></div>
+  <div class="card"><div class="chart-title">商家 / 交易对方 Top 10</div><div id="chart-merchant" class="chart"></div></div>
+  <div class="card"><div class="chart-title">周内分布</div><div id="chart-weekday" class="chart"></div></div>
+  <div class="card"><div class="chart-title">支付方式分布</div><div id="chart-paymethod" class="chart"></div></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='echarts.min.js') }}"></script>
+<script>window.echarts || document.write('<script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"><\/script>')</script>
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+<script>
+const $ = id => document.getElementById(id);
+const charts = {};
+const DOW = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+
+function chart(id) {
+  if (!charts[id]) charts[id] = echarts.init($(id));
+  return charts[id];
+}
+
+async function loadStats() {
+  const qs = new URLSearchParams();
+  if ($('s-start').value) qs.set('start', $('s-start').value);
+  if ($('s-end').value) qs.set('end', $('s-end').value);
+  const d = await api('/api/stats?' + qs);
+  if (!d.monthly.length) {
+    Object.values(charts).forEach(c => c.clear());
+    $('stats-range').textContent = '暂无数据';
+    return;
+  }
+  $('stats-range').textContent =
+    `范围：${d.monthly[0].month} ~ ${d.monthly[d.monthly.length - 1].month}`;
+
+  const months = d.monthly.map(x => x.month);
+  const totals = d.monthly.map(x => x.total);
+
+  // 1. 月度对比（柱状）
+  chart('chart-monthly').setOption({
+    tooltip: { trigger: 'axis', valueFormatter: v => '¥' + v },
+    xAxis: { type: 'category', data: months },
+    yAxis: { type: 'value' },
+    series: [{ type: 'bar', data: totals, itemStyle: { color: '#ef5350', borderRadius: [4, 4, 0, 0] } }],
+    grid: { left: 50, right: 20, top: 20, bottom: 30 },
+  }, true);
+
+  // 2. 月度趋势（折线 + 3 月均线）
+  const ma = totals.map((_, i) =>
+    i < 2 ? null : +( (totals[i-2] + totals[i-1] + totals[i]) / 3 ).toFixed(2));
+  chart('chart-trend').setOption({
+    tooltip: { trigger: 'axis', valueFormatter: v => '¥' + v },
+    xAxis: { type: 'category', data: months },
+    yAxis: { type: 'value', scale: true },
+    series: [
+      { name: '月消费', type: 'line', data: totals, smooth: true,
+        itemStyle: { color: '#ef5350' }, areaStyle: { opacity: 0.08 } },
+      { name: '3月均线', type: 'line', data: ma, smooth: true, symbol: 'none',
+        lineStyle: { type: 'dashed', color: '#5c6bc0' } },
+    ],
+    grid: { left: 50, right: 20, top: 30, bottom: 30 },
+  }, true);
+
+  // 3. 类别占比（环形）
+  chart('chart-category').setOption({
+    tooltip: { trigger: 'item', formatter: '{b}: ¥{c} ({d}%)' },
+    series: [{ type: 'pie', radius: ['40%', '68%'],
+      data: d.categories.map(x => ({ name: x.name, value: x.total })),
+      label: { formatter: '{b}\n{d}%' } }],
+  }, true);
+
+  // 4. 商家 Top10（横向条形）
+  const merch = [...d.merchants].reverse();
+  chart('chart-merchant').setOption({
+    tooltip: { trigger: 'axis', valueFormatter: v => '¥' + v },
+    xAxis: { type: 'value' },
+    yAxis: { type: 'category',
+      data: merch.map(x => x.name.length > 10 ? x.name.slice(0, 10) + '…' : x.name) },
+    series: [{ type: 'bar', data: merch.map(x => x.total),
+      itemStyle: { color: '#5c6bc0', borderRadius: [0, 4, 4, 0] },
+      label: { show: true, position: 'right', formatter: p => '¥' + p.value } }],
+    grid: { left: 110, right: 70, top: 10, bottom: 30 },
+  }, true);
+
+  // 5. 周内分布
+  const wd = [0, 0, 0, 0, 0, 0, 0];
+  d.weekday.forEach(x => wd[x.dow] = x.total);
+  chart('chart-weekday').setOption({
+    tooltip: { trigger: 'axis', valueFormatter: v => '¥' + v },
+    xAxis: { type: 'category', data: DOW },
+    yAxis: { type: 'value' },
+    series: [{ type: 'bar', data: wd,
+      itemStyle: { color: '#26a69a', borderRadius: [4, 4, 0, 0] } }],
+    grid: { left: 50, right: 20, top: 20, bottom: 30 },
+  }, true);
+
+  // 6. 支付方式分布
+  chart('chart-paymethod').setOption({
+    tooltip: { trigger: 'item', formatter: '{b}: ¥{c} ({d}%)' },
+    series: [{ type: 'pie', radius: '62%',
+      data: d.paymethod.map(x => ({ name: x.name, value: x.total })),
+      label: { formatter: '{b}\n{d}%' } }],
+  }, true);
+}
+
+async function init() {
+  const d = await api('/api/stats');
+  const opts = '<option value="">（不限）</option>' +
+    d.months.map(m => `<option value="${m}">${m}</option>`).join('');
+  $('s-start').innerHTML = opts;
+  $('s-end').innerHTML = opts;
+  if (d.months.length) $('s-end').value = d.months[d.months.length - 1];
+  loadStats();
+  window.addEventListener('resize', () =>
+    Object.values(charts).forEach(c => c.resize()));
+}
+
+$('btn-query').onclick = loadStats;
+init();
+</script>
+{% endblock %}

@@ -1,0 +1,111 @@
+{% extends 'base.html' %}
+{% block title %}消费日历 - 记账本{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="cal-header">
+    <button class="btn" id="btn-prev">‹ 上月</button>
+    <h2 id="cal-title"></h2>
+    <button class="btn" id="btn-next">下月 ›</button>
+    <div class="spacer" style="flex:1"></div>
+    <div class="cal-summary">
+      <div class="item"><b id="sum-total">-</b><span>本月合计</span></div>
+      <div class="item"><b id="sum-avg">-</b><span>日均</span></div>
+    </div>
+  </div>
+  <div class="cal-grid" id="cal-grid"></div>
+</div>
+
+<div class="card" id="day-detail" style="display:none">
+  <div class="page-title" id="day-title"></div>
+  <table>
+    <thead><tr>
+      <th>时间</th><th>来源</th><th>交易对方</th><th>商品说明</th>
+      <th>类别</th><th class="num">金额</th><th>支付方式</th>
+    </tr></thead>
+    <tbody id="day-body"></tbody>
+  </table>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+<script>
+const $ = id => document.getElementById(id);
+const DOW = ['一', '二', '三', '四', '五', '六', '日'];
+let curMonth = new Date().toISOString().slice(0, 7);
+let selectedDate = null;
+
+function shiftMonth(delta) {
+  const [y, m] = curMonth.split('-').map(Number);
+  const d = new Date(y, m - 1 + delta, 1);
+  curMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  selectedDate = null;
+  load();
+}
+
+async function load() {
+  const data = await api('/api/calendar?month=' + curMonth);
+  const [y, m] = curMonth.split('-').map(Number);
+  $('cal-title').textContent = `${y} 年 ${m} 月`;
+  $('sum-total').textContent = money(data.month_total);
+  $('sum-avg').textContent = money(data.daily_avg);
+
+  const maxAmt = Math.max(0.01, ...Object.values(data.days).map(v => v.total));
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const firstDow = (new Date(y, m - 1, 1).getDay() + 6) % 7;  // 周一=0
+  const dim = data.days_in_month;
+
+  let html = DOW.map(d => `<div class="cal-dow">周${d}</div>`).join('');
+  for (let i = 0; i < firstDow; i++) html += '<div class="cal-cell empty"></div>';
+  for (let d = 1; d <= dim; d++) {
+    const ds = `${curMonth}-${String(d).padStart(2, '0')}`;
+    const v = data.days[ds];
+    let style = '', inner;
+    if (v && v.total > 0) {
+      const scale = Math.sqrt(v.total / maxAmt);  // 平方根让小额也更可见
+      const alpha = 0.10 + 0.75 * scale;
+      const dark = scale > 0.55;
+      style = `background:rgba(239,83,80,${alpha.toFixed(2)});` +
+              (dark ? 'color:#fff;' : '');
+      inner = `<div class="amt">${money(v.total)}</div><div class="cnt">${v.cnt} 笔</div>`;
+    } else {
+      inner = `<div class="none">${v ? money(0) : ''}</div><div></div>`;
+    }
+    html += `<div class="cal-cell ${ds === todayStr ? 'today' : ''} ${ds === selectedDate ? 'selected' : ''}"
+      style="${style}" data-date="${ds}" onclick="pickDay('${ds}')">
+      <div class="d">${d}</div>${inner}</div>`;
+  }
+  $('cal-grid').innerHTML = html;
+  renderDayDetail();
+}
+
+window.pickDay = async ds => {
+  selectedDate = ds;
+  document.querySelectorAll('.cal-cell').forEach(el =>
+    el.classList.toggle('selected', el.dataset.date === ds));
+  renderDayDetail();
+};
+
+async function renderDayDetail() {
+  const box = $('day-detail');
+  if (!selectedDate) { box.style.display = 'none'; return; }
+  const data = await api('/api/day?date=' + selectedDate);
+  box.style.display = 'block';
+  $('day-title').textContent = `${selectedDate} · 合计 ${money(data.total)}（${data.transactions.length} 笔）`;
+  $('day-body').innerHTML = data.transactions.map(t => `
+    <tr>
+      <td class="small">${esc(t.tx_time.slice(11) || '-')}</td>
+      <td>${sourceBadge(t)}</td>
+      <td>${esc(t.counterparty) || '-'}</td>
+      <td class="small">${esc(t.description)}</td>
+      <td>${categoryBadge(t)}</td>
+      <td class="num">${amountCell(t)}</td>
+      <td class="small text-muted">${esc(t.pay_method) || '-'}</td>
+    </tr>`).join('');
+}
+
+$('btn-prev').onclick = () => shiftMonth(-1);
+$('btn-next').onclick = () => shiftMonth(1);
+load();
+</script>
+{% endblock %}

@@ -1,0 +1,222 @@
+{% extends 'base.html' %}
+{% block title %}交易明细 - 记账本{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="page-title">交易明细</div>
+  <div class="notice" id="pending-notice" style="display:none"></div>
+
+  <div class="filters">
+    <select id="f-month"><option value="">全部月份</option></select>
+    <select id="f-category"><option value="">全部类别</option><option value="none">待分类</option></select>
+    <select id="f-source">
+      <option value="">全部来源</option>
+      <option value="wechat">微信</option>
+      <option value="alipay">支付宝</option>
+      <option value="manual">手动记账</option>
+    </select>
+    <input type="text" id="f-q" placeholder="搜索对方 / 商品说明" style="width:180px">
+    <button class="btn" id="btn-search">查询</button>
+    <div class="spacer"></div>
+    <span class="small text-muted" id="summary"></span>
+    <input type="file" id="file-import" accept=".xlsx,.csv" hidden>
+    <button class="btn" id="btn-import">导入账单</button>
+    <button class="btn btn-primary" id="btn-add">+ 手动记账</button>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>时间</th><th>来源</th><th>交易对方</th><th>商品说明</th>
+        <th>类别</th><th class="num">金额</th><th>支付方式</th><th>操作</th>
+      </tr>
+    </thead>
+    <tbody id="tx-body"></tbody>
+  </table>
+</div>
+
+<!-- 手动记账 -->
+<div class="modal-mask" id="modal-add">
+  <div class="modal">
+    <h3>手动记账</h3>
+    <div class="form-row"><label>日期 *</label><input type="date" id="add-date"></div>
+    <div class="form-row"><label>金额 *</label><input type="number" id="add-amount" step="0.01" min="0.01"></div>
+    <div class="form-row"><label>类别</label><select id="add-category"></select></div>
+    <div class="form-row"><label>支付方式（可选，如“现金”）</label><input type="text" id="add-pay"></div>
+    <div class="form-row"><label>描述（可选）</label><input type="text" id="add-desc"></div>
+    <div class="actions">
+      <button class="btn" onclick="closeModal('modal-add')">取消</button>
+      <button class="btn btn-primary" id="btn-add-save">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 编辑交易 -->
+<div class="modal-mask" id="modal-edit">
+  <div class="modal">
+    <h3>编辑交易</h3>
+    <div class="form-row"><label>日期</label><input type="date" id="edit-date"></div>
+    <div class="form-row"><label>金额</label><input type="number" id="edit-amount" step="0.01" min="0"></div>
+    <div class="form-row"><label>类别</label><select id="edit-category"></select></div>
+    <div class="form-row"><label>支付方式</label><input type="text" id="edit-pay"></div>
+    <div class="form-row"><label>描述</label><input type="text" id="edit-desc"></div>
+    <div class="form-row check">
+      <input type="checkbox" id="edit-add-rule">
+      <label for="edit-add-rule">同时添加规则：今后“</label>
+      <input type="text" id="edit-keyword" style="flex:1;height:26px">
+      <label for="edit-add-rule">”自动归入所选类别</label>
+    </div>
+    <div class="actions">
+      <button class="btn" onclick="closeModal('modal-edit')">取消</button>
+      <button class="btn btn-primary" id="btn-edit-save">保存</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+<script>
+let CATEGORIES = [];
+let editingId = null;
+
+const $ = id => document.getElementById(id);
+
+function closeModal(id) { $(id).classList.remove('show'); }
+
+async function loadMeta() {
+  const meta = await api('/api/meta');
+  CATEGORIES = meta.categories;
+  const curMonth = new Date().toISOString().slice(0, 7);
+  $('f-month').innerHTML = '<option value="">全部月份</option>' +
+    meta.months.map(m => `<option value="${m}" ${m === curMonth ? 'selected' : ''}>${m}</option>`).join('');
+  $('f-category').innerHTML = '<option value="">全部类别</option><option value="none">待分类</option>' +
+    meta.categories.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
+  const catOpts = '<option value="">待分类</option>' +
+    meta.categories.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
+  $('add-category').innerHTML = catOpts;
+  $('edit-category').innerHTML = catOpts;
+
+  const notice = $('pending-notice');
+  if (meta.pending > 0) {
+    notice.style.display = 'flex';
+    notice.innerHTML = `⚠️ 有 <b>&nbsp;${meta.pending}&nbsp;</b> 笔交易待分类，
+      <a href="#" id="link-pending">点此查看</a>`;
+    $('link-pending').onclick = e => {
+      e.preventDefault();
+      $('f-category').value = 'none';
+      load();
+    };
+  } else {
+    notice.style.display = 'none';
+  }
+}
+
+async function load() {
+  const qs = new URLSearchParams({
+    month: $('f-month').value, category: $('f-category').value,
+    source: $('f-source').value, q: $('f-q').value,
+  });
+  const data = await api('/api/transactions?' + qs);
+  $('summary').textContent = data.count ? `共 ${data.count} 笔，合计 ${money(data.total)}` : '';
+  $('tx-body').innerHTML = data.transactions.map(t => `
+    <tr>
+      <td class="small" style="white-space:nowrap">${esc(t.tx_time)}</td>
+      <td>${sourceBadge(t)}</td>
+      <td>${esc(t.counterparty) || '<span class="text-muted">-</span>'}</td>
+      <td class="small">${esc(t.description)}</td>
+      <td>${categoryBadge(t)}</td>
+      <td class="num">${amountCell(t)}${t.refund_amount > 0 ? ' <span class="badge refund">退款</span>' : ''}</td>
+      <td class="small text-muted">${esc(t.pay_method) || '-'}</td>
+      <td style="white-space:nowrap">
+        <button class="btn-link" onclick="openEdit(${t.id})">编辑</button>
+        <button class="btn-link danger" onclick="delTx(${t.id})">删除</button>
+      </td>
+    </tr>`).join('') || '<tr><td colspan="8" class="text-muted" style="text-align:center;padding:30px">暂无交易，点击右上角“导入账单”开始</td></tr>';
+}
+
+window.openEdit = async id => {
+  const tx = await api('/api/transaction/' + id);
+  editingId = id;
+  $('edit-date').value = tx.tx_time.slice(0, 10);
+  $('edit-amount').value = (tx.amount + tx.refund_amount).toFixed(2);
+  $('edit-category').value = tx.category_id || '';
+  $('edit-pay').value = tx.pay_method;
+  $('edit-desc').value = tx.description;
+  $('edit-add-rule').checked = false;
+  $('edit-keyword').value = tx.counterparty || '';
+  $('modal-edit').classList.add('show');
+};
+
+window.delTx = async id => {
+  if (!confirm('确定删除这笔交易？')) return;
+  await api('/api/transaction/' + id, { method: 'DELETE' });
+  toast('已删除');
+  loadMeta(); load();
+};
+
+$('btn-search').onclick = load;
+$('f-q').addEventListener('keydown', e => { if (e.key === 'Enter') load(); });
+
+$('btn-import').onclick = () => $('file-import').click();
+$('file-import').onchange = async e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const fd = new FormData();
+  fd.append('file', file);
+  try {
+    const res = await fetch('/api/import', { method: 'POST', body: fd });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '导入失败');
+    toast(`导入完成：新增 ${data.imported} 笔` +
+      (data.duplicate ? `，跳过重复 ${data.duplicate} 笔` : '') +
+      `（共解析 ${data.total} 笔）`);
+    loadMeta(); load();
+  } catch (err) {
+    toast(err.message, true);
+  }
+  e.target.value = '';
+};
+
+$('btn-add').onclick = () => {
+  $('add-date').value = new Date().toISOString().slice(0, 10);
+  $('add-amount').value = '';
+  $('add-pay').value = '';
+  $('add-desc').value = '';
+  $('modal-add').classList.add('show');
+};
+
+$('btn-add-save').onclick = async () => {
+  try {
+    await api('/api/transaction', { method: 'POST', body: {
+      date: $('add-date').value,
+      amount: $('add-amount').value,
+      category_id: $('add-category').value,
+      pay_method: $('add-pay').value,
+      description: $('add-desc').value,
+    }});
+    closeModal('modal-add');
+    toast('已添加');
+    loadMeta(); load();
+  } catch (err) { toast(err.message, true); }
+};
+
+$('btn-edit-save').onclick = async () => {
+  try {
+    await api('/api/transaction/' + editingId, { method: 'POST', body: {
+      date: $('edit-date').value,
+      amount: $('edit-amount').value,
+      category_id: $('edit-category').value,
+      pay_method: $('edit-pay').value,
+      description: $('edit-desc').value,
+      add_rule: $('edit-add-rule').checked ? 1 : '',
+      rule_keyword: $('edit-keyword').value,
+    }});
+    closeModal('modal-edit');
+    toast('已保存');
+    loadMeta(); load();
+  } catch (err) { toast(err.message, true); }
+};
+
+loadMeta().then(load);
+</script>
+{% endblock %}

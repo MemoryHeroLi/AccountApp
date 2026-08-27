@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash('D:\\\\ProgramData\\\\anaconda3\\\\envs\\\\app\\\\python.exe' -c ' *)",
+      "Bash('D:\\\\ProgramData\\\\anaconda3\\\\envs\\\\app\\\\python.exe' -X utf8 -c ' *)",
+      "Bash(\"D:\\\\ProgramData\\\\anaconda3\\\\envs\\\\app\\\\python.exe\" -c \"import flask; print\\('flask', flask.__version__\\)\")",
+      "Bash(\"D:\\\\ProgramData\\\\anaconda3\\\\envs\\\\app\\\\python.exe\" -c \"import openpyxl; print\\('openpyxl', openpyxl.__version__\\)\")"
+    ]
+  }
+}
