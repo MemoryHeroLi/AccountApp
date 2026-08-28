@@ -54,22 +54,16 @@ function chart(id) {
 function rebuildSubFilter() {
   const sel = $('s-subcategory');
   const v = $('s-category').value;
-  const subs = CATEGORIES.filter(c => c.parent_id != null);
-  let opts = '<option value="">全部二级分类</option>';
   if (!v) {
-    CATEGORIES.filter(c => !c.parent_id).forEach(top => {
-      const kids = subs.filter(s => s.parent_id === top.id);
-      if (!kids.length) return;
-      opts += `<optgroup label="${esc(top.name)}">`;
-      opts += kids.map(s => `<option value="${s.id}">&nbsp;&nbsp;${esc(s.name)}</option>`).join('');
-      opts += '</optgroup>';
-    });
-  } else {
-    const topId = Number(v);
-    opts += subs.filter(s => s.parent_id === topId)
-      .map(s => `<option value="${s.id}">&nbsp;&nbsp;${esc(s.name)}</option>`).join('');
+    sel.disabled = true;
+    sel.innerHTML = '<option value="">请先选择一级分类</option>';
+    return;
   }
-  sel.innerHTML = opts;
+  sel.disabled = false;
+  const topId = Number(v);
+  const subs = CATEGORIES.filter(c => c.parent_id === topId);
+  sel.innerHTML = '<option value="">全部二级分类</option>' +
+    subs.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
 }
 
 function renderCategoryPie(d) {
