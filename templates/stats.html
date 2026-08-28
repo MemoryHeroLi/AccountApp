@@ -8,7 +8,11 @@
     <select id="s-start"></select>
     <label>结束月份</label>
     <select id="s-end"></select>
+    <select id="s-category"><option value="">全部类别</option></select>
+    <select id="s-subcategory"><option value="">全部二级分类</option></select>
+    <select id="s-bookkeeper"><option value="">全部记账人</option></select>
     <button class="btn btn-primary" id="btn-query">查询</button>
+    <button class="btn" id="btn-reset">重置</button>
     <div class="spacer"></div>
     <span class="small text-muted" id="stats-range"></span>
   </div>
@@ -38,6 +42,7 @@
 const $ = id => document.getElementById(id);
 const charts = {};
 const DOW = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+let CATEGORIES = [];
 let subcatsMap = {};   // parent_name -> [{name, total}]
 let drillParent = null;  // 当前下钻的一级分类名，null = 未下钻
 
@@ -46,10 +51,30 @@ function chart(id) {
   return charts[id];
 }
 
+function rebuildSubFilter() {
+  const sel = $('s-subcategory');
+  const v = $('s-category').value;
+  const subs = CATEGORIES.filter(c => c.parent_id != null);
+  let opts = '<option value="">全部二级分类</option>';
+  if (!v) {
+    CATEGORIES.filter(c => !c.parent_id).forEach(top => {
+      const kids = subs.filter(s => s.parent_id === top.id);
+      if (!kids.length) return;
+      opts += `<optgroup label="${esc(top.name)}">`;
+      opts += kids.map(s => `<option value="${s.id}">&nbsp;&nbsp;${esc(s.name)}</option>`).join('');
+      opts += '</optgroup>';
+    });
+  } else {
+    const topId = Number(v);
+    opts += subs.filter(s => s.parent_id === topId)
+      .map(s => `<option value="${s.id}">&nbsp;&nbsp;${esc(s.name)}</option>`).join('');
+  }
+  sel.innerHTML = opts;
+}
+
 function renderCategoryPie(d) {
   const el = chart('chart-category');
   if (drillParent) {
-    // 下钻模式：显示该一级分类下的二级分布
     const subs = subcatsMap[drillParent] || [];
     if (!subs.length) {
       el.clear();
@@ -65,7 +90,6 @@ function renderCategoryPie(d) {
         itemStyle: { color } }],
     }, true);
   } else {
-    // 一级分类占比
     el.setOption({
       tooltip: { trigger: 'item', formatter: '{b}: ¥{c} ({d}%)' },
       series: [{ type: 'pie', radius: ['40%', '68%'],
@@ -73,7 +97,6 @@ function renderCategoryPie(d) {
         label: { formatter: '{b}\n{d}%' },
         emphasis: { itemStyle: { shadowBlur: 10, shadowOffsetX: 0, shadowColor: 'rgba(0,0,0,0.5)' } } }],
     }, true);
-    // 点击下钻
     el.off('click');
     el.on('click', params => {
       const name = params.name;
@@ -91,6 +114,9 @@ async function loadStats() {
   const qs = new URLSearchParams();
   if ($('s-start').value) qs.set('start', $('s-start').value);
   if ($('s-end').value) qs.set('end', $('s-end').value);
+  if ($('s-category').value) qs.set('category', $('s-category').value);
+  if ($('s-subcategory').value) qs.set('subcategory', $('s-subcategory').value);
+  if ($('s-bookkeeper').value) qs.set('bookkeeper', $('s-bookkeeper').value);
   const d = await api('/api/stats?' + qs);
   if (!d.monthly.length) {
     Object.values(charts).forEach(c => c.clear());
@@ -103,7 +129,6 @@ async function loadStats() {
   const months = d.monthly.map(x => x.month);
   const totals = d.monthly.map(x => x.total);
 
-  // 构建 subcatsMap
   subcatsMap = {};
   d.subcats.forEach(x => {
     if (!subcatsMap[x.parent]) subcatsMap[x.parent] = [];
@@ -176,23 +201,54 @@ $('btn-drill-back').onclick = () => {
   drillParent = null;
   $('cat-chart-title').textContent = '类别占比';
   $('btn-drill-back').style.display = 'none';
-  // 重新渲染一级，需要重新请求数据
   loadStats();
 };
 
+$('s-category').onchange = () => {
+  rebuildSubFilter();
+  drillParent = null;
+  $('cat-chart-title').textContent = '类别占比';
+  $('btn-drill-back').style.display = 'none';
+};
+
+$('s-subcategory').onchange = () => {
+  drillParent = null;
+  $('cat-chart-title').textContent = '类别占比';
+  $('btn-drill-back').style.display = 'none';
+};
+
 async function init() {
-  const d = await api('/api/stats');
-  const opts = '<option value="">（不限）</option>' +
+  const [meta, d] = await Promise.all([api('/api/meta'), api('/api/stats')]);
+  CATEGORIES = meta.categories;
+  const monthOpts = '<option value="">（不限）</option>' +
     d.months.map(m => `<option value="${m}">${m}</option>`).join('');
-  $('s-start').innerHTML = opts;
-  $('s-end').innerHTML = opts;
+  $('s-start').innerHTML = monthOpts;
+  $('s-end').innerHTML = monthOpts;
   if (d.months.length) $('s-end').value = d.months[d.months.length - 1];
+
+  $('s-category').innerHTML = '<option value="">全部类别</option>' + topOptions(CATEGORIES);
+  rebuildSubFilter();
+
+  $('s-bookkeeper').innerHTML = '<option value="">全部记账人</option>' +
+    meta.bookkeepers.map(b => `<option value="${esc(b)}">${esc(b)}</option>`).join('');
+
   loadStats();
   window.addEventListener('resize', () =>
     Object.values(charts).forEach(c => c.resize()));
 }
 
 $('btn-query').onclick = loadStats;
+$('btn-reset').onclick = () => {
+  $('s-start').value = '';
+  $('s-end').value = '';
+  $('s-category').value = '';
+  rebuildSubFilter();
+  $('s-bookkeeper').value = '';
+  drillParent = null;
+  $('cat-chart-title').textContent = '类别占比';
+  $('btn-drill-back').style.display = 'none';
+  loadStats();
+};
 init();
 </script>
 {% endblock %}

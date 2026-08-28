@@ -289,6 +289,9 @@ def create_app():
     def api_stats():
         start = request.args.get('start', '').strip()
         end = request.args.get('end', '').strip()
+        category = request.args.get('category', '').strip()
+        subcategory = request.args.get('subcategory', '').strip()
+        bookkeeper = request.args.get('bookkeeper', '').strip()
         where, params = '', []
         if start:
             where += ' AND tx_time >= ?'
@@ -296,11 +299,21 @@ def create_app():
         if end:
             where += ' AND tx_time <= ?'
             params.append(end + '-31 23:59:59')
+        if category:
+            where += ' AND category_id = ?'
+            params.append(int(category))
+        if subcategory:
+            where += ' AND subcategory_id = ?'
+            params.append(int(subcategory))
+        if bookkeeper:
+            where += ' AND bookkeeper = ?'
+            params.append(bookkeeper)
         cond = ('WHERE 1=1' + where) if where else ''
         conn = get_db()
 
         months = [r[0] for r in conn.execute(
-            'SELECT DISTINCT substr(tx_time,1,7) FROM transactions ORDER BY 1')]
+            f"SELECT DISTINCT substr(tx_time,1,7) FROM transactions {cond} ORDER BY 1",
+            params)]
         monthly = [dict(r) for r in conn.execute(
             f"SELECT substr(tx_time,1,7) AS month, ROUND(SUM(amount),2) AS total"
             f" FROM transactions {cond} GROUP BY month ORDER BY month", params)]
@@ -311,7 +324,7 @@ def create_app():
             f" LEFT JOIN categories p ON p.id=c.parent_id"
             f" {cond} GROUP BY COALESCE(p.name, c.name, '待分类') ORDER BY total DESC", params)]
         subcats = [dict(r) for r in conn.execute(
-            f"SELECT p.name AS parent, s.name AS name, ROUND(SUM(t.amount),2) AS total"
+            f"SELECT p.name AS parent, s.name AS name, ROUND(SUM(amount),2) AS total"
             f" FROM transactions t JOIN categories s ON s.id=t.subcategory_id"
             f" JOIN categories p ON p.id=s.parent_id"
             f" {cond} GROUP BY p.name, s.name ORDER BY total DESC", params)]
