@@ -41,7 +41,36 @@ function toast(msg, isErr = false) {
 function categoryBadge(tx) {
   if (!tx.category_name) return '<span class="badge pending">待分类</span>';
   const c = categoryColor(tx.category_name);
-  return `<span class="badge" style="background:${c}1a;color:${c}">${esc(tx.category_name)}</span>`;
+  const label = tx.subcategory_name
+    ? `${tx.category_name} › ${tx.subcategory_name}`
+    : tx.category_name;
+  return `<span class="badge" style="background:${c}1a;color:${c}">${esc(label)}</span>`;
+}
+
+// 一级分类 + 二级分类两个 td（供交易/规则/类别三页共用）
+function catCells(topName, subName) {
+  if (!topName) return '<td><span class="badge pending">待分类</span></td><td class="text-muted">-</td>';
+  const c = categoryColor(topName);
+  return `<td><span class="badge" style="background:${c}1a;color:${c}">${esc(topName)}</span></td>
+          <td>${subName ? `<span class="badge" style="background:${c}22;color:${c}">${esc(subName)}</span>` : '<span class="text-muted">-</span>'}</td>`;
+}
+
+// 一级分类下拉选项（"全部类别" / "请选择一级分类" 等由调用方加）
+function topOptions(cats) {
+  return cats.filter(c => !c.parent_id)
+    .map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
+}
+
+// 填充二级分类下拉（联动一级），可选回填选中值
+function fillSub(sel, cats, topId, subId) {
+  sel.innerHTML = '<option value="">（无二级分类）</option>';
+  cats.filter(c => c.parent_id === topId).forEach(c => {
+    const opt = document.createElement('option');
+    opt.value = c.id;
+    opt.textContent = c.name;
+    sel.appendChild(opt);
+  });
+  if (subId) sel.value = String(subId);
 }
 
 function sourceBadge(tx) {

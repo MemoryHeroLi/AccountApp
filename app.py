@@ -64,16 +64,17 @@ def create_app():
         conn = get_db()
         imported = 0
         for tx in txs:
-            cid = classifier.classify(conn, tx['counterparty'], tx['description'],
-                                      tx['alipay_category'])
+            cid, sid = classifier.classify(conn, tx['counterparty'],
+                                           tx['description'], tx['alipay_category'])
             cur = conn.execute(
                 'INSERT OR IGNORE INTO transactions'
                 '(order_no, source, tx_time, counterparty, description, amount,'
-                ' refund_amount, pay_method, category_id, bookkeeper, alipay_category)'
-                ' VALUES (?,?,?,?,?,?,?,?,?,?,?)',
+                ' refund_amount, pay_method, category_id, subcategory_id,'
+                ' bookkeeper, alipay_category)'
+                ' VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
                 (tx['order_no'], source, tx['tx_time'], tx['counterparty'],
                  tx['description'], tx['amount'], tx['refund_amount'],
-                 tx['pay_method'], cid, DEFAULT_BOOKKEEPER, tx['alipay_category']))
+                 tx['pay_method'], cid, sid, DEFAULT_BOOKKEEPER, tx['alipay_category']))
             imported += cur.rowcount
         conn.commit()
         conn.close()
@@ -88,7 +89,7 @@ def create_app():
             "SELECT DISTINCT substr(tx_time,1,7) FROM transactions "
             "ORDER BY 1 DESC")]
         categories = [dict(r) for r in conn.execute(
-            'SELECT id, name FROM categories ORDER BY id')]
+            'SELECT id, name, parent_id FROM categories ORDER BY id')]
         bookkeepers = [r[0] for r in conn.execute(
             "SELECT DISTINCT bookkeeper FROM transactions "
             "WHERE bookkeeper != '' ORDER BY 1")]
@@ -103,12 +104,15 @@ def create_app():
     def api_transactions():
         month = request.args.get('month', '').strip()
         category = request.args.get('category', '').strip()
+        subcategory = request.args.get('subcategory', '').strip()
         source = request.args.get('source', '').strip()
         bookkeeper = request.args.get('bookkeeper', '').strip()
         q = request.args.get('q', '').strip()
 
-        sql = ('SELECT t.*, c.name AS category_name FROM transactions t '
-               'LEFT JOIN categories c ON c.id = t.category_id WHERE 1=1')
+        sql = ('SELECT t.*, c.name AS category_name, s.name AS subcategory_name '
+               'FROM transactions t '
+               'LEFT JOIN categories c ON c.id = t.category_id '
+               'LEFT JOIN categories s ON s.id = t.subcategory_id WHERE 1=1')
         params = []
         if month:
             sql += " AND t.tx_time LIKE ?"
@@ -118,6 +122,9 @@ def create_app():
         elif category:
             sql += ' AND t.category_id = ?'
             params.append(int(category))
+        if subcategory:
+            sql += ' AND t.subcategory_id = ?'
+            params.append(int(subcategory))
         if source:
             sql += ' AND t.source = ?'
             params.append(source)
@@ -148,14 +155,21 @@ def create_app():
             return jsonify({'error': '请填写正确的日期和金额'}), 400
         conn = get_db()
         bookkeeper = (d.get('bookkeeper') or '').strip() or DEFAULT_BOOKKEEPER
+        category_id = int(d['category_id']) if d.get('category_id') else None
+        subcategory_id = int(d['subcategory_id']) if d.get('subcategory_id') else None
+        if subcategory_id:
+            srow = conn.execute('SELECT parent_id FROM categories WHERE id=?',
+                                (subcategory_id,)).fetchone()
+            if not srow or srow['parent_id'] != category_id:
+                conn.close()
+                return jsonify({'error': '二级分类不属于所选一级分类'}), 400
         conn.execute(
             'INSERT INTO transactions(order_no, source, tx_time, counterparty,'
-            ' description, amount, pay_method, category_id, bookkeeper, manual)'
-            ' VALUES (?,?,?,?,?,?,?,?,?,1)',
+            ' description, amount, pay_method, category_id, subcategory_id,'
+            ' bookkeeper, manual) VALUES (?,?,?,?,?,?,?,?,?,?,1)',
             ('M-' + uuid.uuid4().hex[:16], 'manual', tx_date, '',
              d.get('description', '').strip(), amount,
-             d.get('pay_method', '').strip(),
-             int(d['category_id']) if d.get('category_id') else None,
+             d.get('pay_method', '').strip(), category_id, subcategory_id,
              bookkeeper))
         conn.commit()
         conn.close()
@@ -165,8 +179,10 @@ def create_app():
     def api_get_transaction(tx_id):
         conn = get_db()
         row = conn.execute(
-            'SELECT t.*, c.name AS category_name FROM transactions t '
-            'LEFT JOIN categories c ON c.id=t.category_id WHERE t.id=?',
+            'SELECT t.*, c.name AS category_name, s.name AS subcategory_name '
+            'FROM transactions t '
+            'LEFT JOIN categories c ON c.id=t.category_id '
+            'LEFT JOIN categories s ON s.id=t.subcategory_id WHERE t.id=?',
             (tx_id,)).fetchone()
         conn.close()
         if not row:
@@ -191,23 +207,31 @@ def create_app():
             conn.close()
             return jsonify({'error': '金额不能为负'}), 400
         category_id = int(d['category_id']) if d.get('category_id') else None
+        subcategory_id = int(d['subcategory_id']) if d.get('subcategory_id') else None
         bookkeeper = d['bookkeeper'].strip() if 'bookkeeper' in d else row['bookkeeper']
+        if subcategory_id:
+            srow = conn.execute('SELECT parent_id FROM categories WHERE id=?',
+                                (subcategory_id,)).fetchone()
+            if not srow or srow['parent_id'] != category_id:
+                conn.close()
+                return jsonify({'error': '二级分类不属于所选一级分类'}), 400
         conn.execute(
             'UPDATE transactions SET tx_time=?, amount=?, description=?,'
-            ' pay_method=?, category_id=?, bookkeeper=?, manual=1 WHERE id=?',
+            ' pay_method=?, category_id=?, subcategory_id=?, bookkeeper=?, manual=1 WHERE id=?',
             (tx_time, amount,
              d['description'] if 'description' in d else row['description'],
              d['pay_method'] if 'pay_method' in d else row['pay_method'],
-             category_id, bookkeeper, tx_id))
-        # 勾选“同时添加规则”：该关键词今后自动归入所选类别
+             category_id, subcategory_id, bookkeeper, tx_id))
+        # 勾选“同时添加规则”：该关键词今后自动归入所选（二级优先）类别
         if d.get('add_rule') and d.get('rule_keyword'):
+            rule_cat = subcategory_id or category_id
             cat = conn.execute('SELECT id FROM categories WHERE id=?',
-                               (category_id,)).fetchone()
+                               (rule_cat,)).fetchone()
             if cat:
                 conn.execute(
                     'INSERT INTO rules(keyword, category_id, sort_order) '
                     'SELECT ?, ?, COALESCE(MAX(sort_order),0)+1 FROM rules',
-                    (d['rule_keyword'].strip(), category_id))
+                    (d['rule_keyword'].strip(), rule_cat))
         conn.commit()
         conn.close()
         return jsonify({'ok': True})
@@ -251,8 +275,10 @@ def create_app():
             return jsonify({'error': '日期格式错误'}), 400
         conn = get_db()
         rows = [tx_to_dict(r) for r in conn.execute(
-            'SELECT t.*, c.name AS category_name FROM transactions t '
+            'SELECT t.*, c.name AS category_name, s.name AS subcategory_name '
+            'FROM transactions t '
             'LEFT JOIN categories c ON c.id=t.category_id '
+            'LEFT JOIN categories s ON s.id=t.subcategory_id '
             'WHERE t.tx_time LIKE ? ORDER BY t.tx_time', (d + '%',))]
         conn.close()
         return jsonify({'transactions': rows,
@@ -279,9 +305,16 @@ def create_app():
             f"SELECT substr(tx_time,1,7) AS month, ROUND(SUM(amount),2) AS total"
             f" FROM transactions {cond} GROUP BY month ORDER BY month", params)]
         categories = [dict(r) for r in conn.execute(
-            f"SELECT COALESCE(c.name,'待分类') AS name, ROUND(SUM(t.amount),2) AS total"
+            f"SELECT COALESCE(p.name, c.name, '待分类') AS name,"
+            f" ROUND(SUM(t.amount),2) AS total"
             f" FROM transactions t LEFT JOIN categories c ON c.id=t.category_id"
-            f" {cond} GROUP BY name ORDER BY total DESC", params)]
+            f" LEFT JOIN categories p ON p.id=c.parent_id"
+            f" {cond} GROUP BY COALESCE(p.name, c.name, '待分类') ORDER BY total DESC", params)]
+        subcats = [dict(r) for r in conn.execute(
+            f"SELECT p.name AS parent, s.name AS name, ROUND(SUM(t.amount),2) AS total"
+            f" FROM transactions t JOIN categories s ON s.id=t.subcategory_id"
+            f" JOIN categories p ON p.id=s.parent_id"
+            f" {cond} GROUP BY p.name, s.name ORDER BY total DESC", params)]
         merchants = [dict(r) for r in conn.execute(
             f"SELECT COALESCE(NULLIF(NULLIF(counterparty,''),'/'),'(未知)') AS name,"
             f" ROUND(SUM(amount),2) AS total, COUNT(*) AS cnt"
@@ -297,7 +330,8 @@ def create_app():
             f" GROUP BY name ORDER BY total DESC", params)]
         conn.close()
         return jsonify({'months': months, 'monthly': monthly,
-                        'categories': categories, 'merchants': merchants,
+                        'categories': categories, 'subcats': subcats,
+                        'merchants': merchants,
                         'weekday': weekday, 'paymethod': paymethod})
 
     # ---------------- 分类规则 ----------------
@@ -305,8 +339,10 @@ def create_app():
     def api_rules():
         conn = get_db()
         rules = [dict(r) for r in conn.execute(
-            'SELECT r.*, c.name AS category_name FROM rules r '
+            'SELECT r.*, c.name AS category_name, p.id AS parent_id,'
+            ' p.name AS parent_name FROM rules r '
             'JOIN categories c ON c.id = r.category_id '
+            'LEFT JOIN categories p ON p.id = c.parent_id '
             'ORDER BY r.sort_order, r.id')]
         conn.close()
         return jsonify({'rules': rules})
@@ -317,11 +353,20 @@ def create_app():
         keyword = (d.get('keyword') or '').strip()
         if not keyword or not d.get('category_id'):
             return jsonify({'error': '关键词和类别不能为空'}), 400
+        category_id = int(d['category_id'])
+        subcategory_id = int(d['subcategory_id']) if d.get('subcategory_id') else None
+        leaf = subcategory_id or category_id
         conn = get_db()
+        if subcategory_id:
+            srow = conn.execute('SELECT parent_id FROM categories WHERE id=?',
+                                (subcategory_id,)).fetchone()
+            if not srow or srow['parent_id'] != category_id:
+                conn.close()
+                return jsonify({'error': '二级分类不属于所选一级分类'}), 400
         conn.execute(
             'INSERT INTO rules(keyword, category_id, sort_order) '
             'SELECT ?, ?, COALESCE(MAX(sort_order),0)+1 FROM rules',
-            (keyword, int(d['category_id'])))
+            (keyword, leaf))
         conn.commit()
         conn.close()
         return jsonify({'ok': True})
@@ -332,9 +377,18 @@ def create_app():
         keyword = (d.get('keyword') or '').strip()
         if not keyword or not d.get('category_id'):
             return jsonify({'error': '关键词和类别不能为空'}), 400
+        category_id = int(d['category_id'])
+        subcategory_id = int(d['subcategory_id']) if d.get('subcategory_id') else None
+        leaf = subcategory_id or category_id
         conn = get_db()
+        if subcategory_id:
+            srow = conn.execute('SELECT parent_id FROM categories WHERE id=?',
+                                (subcategory_id,)).fetchone()
+            if not srow or srow['parent_id'] != category_id:
+                conn.close()
+                return jsonify({'error': '二级分类不属于所选一级分类'}), 400
         conn.execute('UPDATE rules SET keyword=?, category_id=? WHERE id=?',
-                     (keyword, int(d['category_id']), rule_id))
+                     (keyword, leaf, rule_id))
         conn.commit()
         conn.close()
         return jsonify({'ok': True})
@@ -383,20 +437,32 @@ def create_app():
     def api_categories():
         conn = get_db()
         cats = [dict(r) for r in conn.execute(
-            'SELECT c.id, c.name, COUNT(t.id) AS cnt FROM categories c '
-            'LEFT JOIN transactions t ON t.category_id = c.id '
-            'GROUP BY c.id ORDER BY c.id')]
+            'SELECT c.id, c.name, c.parent_id,'
+            ' (SELECT COUNT(*) FROM transactions t'
+            '  WHERE t.category_id=c.id OR t.subcategory_id=c.id) AS cnt'
+            ' FROM categories c ORDER BY c.id')]
         conn.close()
         return jsonify({'categories': cats})
 
     @app.post('/api/categories')
     def api_add_category():
-        name = (request.get_json(force=True).get('name') or '').strip()
+        d = request.get_json(force=True)
+        name = (d.get('name') or '').strip()
         if not name:
             return jsonify({'error': '类别名不能为空'}), 400
         conn = get_db()
         try:
-            conn.execute('INSERT INTO categories(name) VALUES (?)', (name,))
+            if d.get('parent_id'):
+                parent_id = int(d['parent_id'])
+                p = conn.execute('SELECT id FROM categories WHERE id=? AND parent_id IS NULL',
+                                 (parent_id,)).fetchone()
+                if not p:
+                    conn.close()
+                    return jsonify({'error': '请选择有效的一级分类'}), 400
+                conn.execute('INSERT INTO categories(name, parent_id) VALUES (?,?)',
+                             (name, parent_id))
+            else:
+                conn.execute('INSERT INTO categories(name) VALUES (?)', (name,))
             conn.commit()
         except Exception:
             conn.close()
@@ -426,14 +492,39 @@ def create_app():
     @app.delete('/api/category/<int:cat_id>')
     def api_delete_category(cat_id):
         conn = get_db()
-        cnt = conn.execute('SELECT COUNT(*) FROM transactions '
-                           'WHERE category_id=?', (cat_id,)).fetchone()[0]
-        if cnt > 0:
+        row = conn.execute('SELECT parent_id FROM categories WHERE id=?',
+                           (cat_id,)).fetchone()
+        if not row:
             conn.close()
-            return jsonify({'error': f'仍有 {cnt} 笔交易使用该类别，'
-                                     f'请先改分类后再删除'}), 400
-        conn.execute('DELETE FROM rules WHERE category_id=?', (cat_id,))
-        conn.execute('DELETE FROM categories WHERE id=?', (cat_id,))
+            return jsonify({'error': '类别不存在'}), 404
+        if row['parent_id'] is None:
+            # 一级分类：检查自身及子级是否被交易引用
+            cnt = conn.execute(
+                'SELECT COUNT(*) FROM transactions t '
+                'WHERE t.category_id=? OR t.subcategory_id IN '
+                '(SELECT id FROM categories WHERE parent_id=?)',
+                (cat_id, cat_id)).fetchone()[0]
+            if cnt > 0:
+                conn.close()
+                return jsonify({'error': f'仍有 {cnt} 笔交易使用该类别'
+                                         f'或其二级分类，请先改分类后再删除'}), 400
+            child_ids = [r['id'] for r in conn.execute(
+                'SELECT id FROM categories WHERE parent_id=?', (cat_id,))]
+            for cid in child_ids:
+                conn.execute('DELETE FROM rules WHERE category_id=?', (cid,))
+            conn.execute('DELETE FROM rules WHERE category_id=?', (cat_id,))
+            conn.execute('DELETE FROM categories WHERE id=? OR parent_id=?',
+                         (cat_id, cat_id))
+        else:
+            # 二级分类
+            cnt = conn.execute('SELECT COUNT(*) FROM transactions '
+                               'WHERE subcategory_id=?', (cat_id,)).fetchone()[0]
+            if cnt > 0:
+                conn.close()
+                return jsonify({'error': f'仍有 {cnt} 笔交易使用该类别，'
+                                         f'请先改分类后再删除'}), 400
+            conn.execute('DELETE FROM rules WHERE category_id=?', (cat_id,))
+            conn.execute('DELETE FROM categories WHERE id=?', (cat_id,))
         conn.commit()
         conn.close()
         return jsonify({'ok': True})

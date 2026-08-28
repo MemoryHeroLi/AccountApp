@@ -8,6 +8,7 @@
   <div class="filters">
     <select id="f-month"><option value="">全部月份</option></select>
     <select id="f-category"><option value="">全部类别</option><option value="none">待分类</option></select>
+    <select id="f-subcategory"><option value="">全部二级分类</option></select>
     <select id="f-source">
       <option value="">全部来源</option>
       <option value="wechat">微信</option>
@@ -28,7 +29,7 @@
     <thead>
       <tr>
         <th>时间</th><th>来源</th><th>交易对方</th><th>商品说明</th>
-        <th>类别</th><th class="num">金额</th><th>支付方式</th><th class="bookkeeper">记账人</th><th>操作</th>
+        <th>一级分类</th><th>二级分类</th><th class="num">金额</th><th>支付方式</th><th class="bookkeeper">记账人</th><th>操作</th>
       </tr>
     </thead>
     <tbody id="tx-body"></tbody>
@@ -41,8 +42,9 @@
     <h3>手动记账</h3>
     <div class="form-row"><label>日期 *</label><input type="date" id="add-date"></div>
     <div class="form-row"><label>金额 *</label><input type="number" id="add-amount" step="0.01" min="0.01"></div>
-    <div class="form-row"><label>类别</label><select id="add-category"></select></div>
-    <div class="form-row"><label>支付方式（可选，如“现金”）</label><input type="text" id="add-pay"></div>
+    <div class="form-row"><label>类别（一级）*</label><select id="add-category"></select></div>
+    <div class="form-row"><label>二级分类（可选）</label><select id="add-subcategory"><option value="">（无二级分类）</option></select></div>
+    <div class="form-row"><label>支付方式（可选，如"现金"）</label><input type="text" id="add-pay"></div>
     <div class="form-row"><label>记账人</label><input type="text" id="add-bookkeeper" value="旺仔爹地"></div>
     <div class="form-row"><label>描述（可选）</label><input type="text" id="add-desc"></div>
     <div class="actions">
@@ -58,15 +60,16 @@
     <h3>编辑交易</h3>
     <div class="form-row"><label>日期</label><input type="date" id="edit-date"></div>
     <div class="form-row"><label>金额</label><input type="number" id="edit-amount" step="0.01" min="0"></div>
-    <div class="form-row"><label>类别</label><select id="edit-category"></select></div>
+    <div class="form-row"><label>类别（一级）*</label><select id="edit-category"></select></div>
+    <div class="form-row"><label>二级分类（可选）</label><select id="edit-subcategory"><option value="">（无二级分类）</option></select></div>
     <div class="form-row"><label>支付方式</label><input type="text" id="edit-pay"></div>
     <div class="form-row"><label>记账人</label><input type="text" id="edit-bookkeeper"></div>
     <div class="form-row"><label>描述</label><input type="text" id="edit-desc"></div>
     <div class="form-row check">
       <input type="checkbox" id="edit-add-rule">
-      <label for="edit-add-rule">同时添加规则：今后“</label>
+      <label for="edit-add-rule">同时添加规则：今后"</label>
       <input type="text" id="edit-keyword" style="flex:1;height:26px">
-      <label for="edit-add-rule">”自动归入所选类别</label>
+      <label for="edit-add-rule">"自动归入所选类别</label>
     </div>
     <div class="actions">
       <button class="btn" onclick="closeModal('modal-edit')">取消</button>
@@ -86,6 +89,35 @@ const $ = id => document.getElementById(id);
 
 function closeModal(id) { $(id).classList.remove('show'); }
 
+function rebuildSubFilter() {
+  const sel = $('f-subcategory');
+  const v = $('f-category').value;
+  if (v === 'none') {
+    sel.disabled = true;
+    sel.innerHTML = '<option value="">全部二级分类</option>';
+    return;
+  }
+  sel.disabled = false;
+  const subs = CATEGORIES.filter(c => c.parent_id != null);
+  let opts = '<option value="">全部二级分类</option>';
+  if (!v) {
+    // 全部类别：按一级分组
+    CATEGORIES.filter(c => !c.parent_id).forEach(top => {
+      const kids = subs.filter(s => s.parent_id === top.id);
+      if (!kids.length) return;
+      opts += `<optgroup label="${esc(top.name)}">`;
+      opts += kids.map(s => `<option value="${s.id}">&nbsp;&nbsp;${esc(s.name)}</option>`).join('');
+      opts += '</optgroup>';
+    });
+  } else {
+    // 指定一级：只列其下的二级
+    const topId = Number(v);
+    opts += subs.filter(s => s.parent_id === topId)
+      .map(s => `<option value="${s.id}">&nbsp;&nbsp;${esc(s.name)}</option>`).join('');
+  }
+  sel.innerHTML = opts;
+}
+
 async function loadMeta() {
   const meta = await api('/api/meta');
   CATEGORIES = meta.categories;
@@ -93,13 +125,18 @@ async function loadMeta() {
   $('f-month').innerHTML = '<option value="">全部月份</option>' +
     meta.months.map(m => `<option value="${m}" ${m === curMonth ? 'selected' : ''}>${m}</option>`).join('');
   $('f-category').innerHTML = '<option value="">全部类别</option><option value="none">待分类</option>' +
-    meta.categories.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
+    topOptions(CATEGORIES);
+  rebuildSubFilter();
+  $('f-category').onchange = rebuildSubFilter;
   $('f-bookkeeper').innerHTML = '<option value="">全部记账人</option>' +
     meta.bookkeepers.map(b => `<option value="${esc(b)}">${esc(b)}</option>`).join('');
-  const catOpts = '<option value="">待分类</option>' +
-    meta.categories.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
-  $('add-category').innerHTML = catOpts;
-  $('edit-category').innerHTML = catOpts;
+  $('add-category').innerHTML = '<option value="">待分类</option>' + topOptions(CATEGORIES);
+  $('edit-category').innerHTML = '<option value="">待分类</option>' + topOptions(CATEGORIES);
+
+  // 级联下拉：添加弹窗
+  $('add-category').onchange = () => fillSub($('add-subcategory'), CATEGORIES, Number($('add-category').value), '');
+  // 级联下拉：编辑弹窗
+  $('edit-category').onchange = () => fillSub($('edit-subcategory'), CATEGORIES, Number($('edit-category').value), '');
 
   const notice = $('pending-notice');
   if (meta.pending > 0) {
@@ -109,6 +146,7 @@ async function loadMeta() {
     $('link-pending').onclick = e => {
       e.preventDefault();
       $('f-category').value = 'none';
+      rebuildSubFilter();
       load();
     };
   } else {
@@ -119,6 +157,7 @@ async function loadMeta() {
 async function load() {
   const qs = new URLSearchParams({
     month: $('f-month').value, category: $('f-category').value,
+    subcategory: $('f-subcategory').value,
     source: $('f-source').value, bookkeeper: $('f-bookkeeper').value,
     q: $('f-q').value,
   });
@@ -130,7 +169,7 @@ async function load() {
       <td>${sourceBadge(t)}</td>
       <td>${esc(t.counterparty) || '<span class="text-muted">-</span>'}</td>
       <td class="small">${esc(t.description)}</td>
-      <td>${categoryBadge(t)}</td>
+      ${catCells(t.category_name, t.subcategory_name)}
       <td class="num">${amountCell(t)}${t.refund_amount > 0 ? ' <span class="badge refund">退款</span>' : ''}</td>
       <td class="small text-muted">${esc(t.pay_method) || '-'}</td>
       <td class="small bookkeeper">${esc(t.bookkeeper) || '-'}</td>
@@ -138,7 +177,7 @@ async function load() {
         <button class="btn-link" onclick="openEdit(${t.id})">编辑</button>
         <button class="btn-link danger" onclick="delTx(${t.id})">删除</button>
       </td>
-    </tr>`).join('') || '<tr><td colspan="9" class="text-muted" style="text-align:center;padding:30px">暂无交易，点击右上角“导入账单”开始</td></tr>';
+    </tr>`).join('') || '<tr><td colspan="10" class="text-muted" style="text-align:center;padding:30px">暂无交易，点击右上角"导入账单"开始</td></tr>';
 }
 
 window.openEdit = async id => {
@@ -147,6 +186,7 @@ window.openEdit = async id => {
   $('edit-date').value = tx.tx_time.slice(0, 10);
   $('edit-amount').value = (tx.amount + tx.refund_amount).toFixed(2);
   $('edit-category').value = tx.category_id || '';
+  fillSub($('edit-subcategory'), CATEGORIES, tx.category_id, tx.subcategory_id);
   $('edit-pay').value = tx.pay_method;
   $('edit-bookkeeper').value = tx.bookkeeper || '';
   $('edit-desc').value = tx.description;
@@ -190,6 +230,8 @@ $('btn-add').onclick = () => {
   $('add-amount').value = '';
   $('add-pay').value = '';
   $('add-desc').value = '';
+  $('add-category').value = '';
+  $('add-subcategory').innerHTML = '<option value="">（无二级分类）</option>';
   $('modal-add').classList.add('show');
 };
 
@@ -199,6 +241,7 @@ $('btn-add-save').onclick = async () => {
       date: $('add-date').value,
       amount: $('add-amount').value,
       category_id: $('add-category').value,
+      subcategory_id: $('add-subcategory').value,
       pay_method: $('add-pay').value,
       bookkeeper: $('add-bookkeeper').value,
       description: $('add-desc').value,
@@ -215,6 +258,7 @@ $('btn-edit-save').onclick = async () => {
       date: $('edit-date').value,
       amount: $('edit-amount').value,
       category_id: $('edit-category').value,
+      subcategory_id: $('edit-subcategory').value,
       pay_method: $('edit-pay').value,
       bookkeeper: $('edit-bookkeeper').value,
       description: $('edit-desc').value,

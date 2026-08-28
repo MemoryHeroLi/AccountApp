@@ -27,34 +27,43 @@ def _category_id_by_name(conn, name):
 
 
 def classify(conn, counterparty, description, alipay_category=''):
-    """返回类别 id；无法判定时返回 None（待分类）。"""
+    """返回 (category_id, subcategory_id)；无法判定时返回 (None, None)（待分类）。
+
+    规则/支付宝映射可能命中一级或二级分类：若命中的是二级分类，则拆出
+    其父级作为 category_id，自身作为 subcategory_id。"""
     text = f'{counterparty or ""} {description or ""}'
+    cid = None
     for rule in conn.execute(
             'SELECT keyword, category_id FROM rules WHERE enabled=1 ORDER BY sort_order, id'):
         if rule['keyword'] and rule['keyword'] in text:
-            return rule['category_id']
-    if alipay_category:
+            cid = rule['category_id']
+            break
+    if cid is None and alipay_category:
         mapped = ALIPAY_MAP.get(alipay_category, '其他')
         cid = _category_id_by_name(conn, mapped)
         if cid is None:  # 用户可能改过类别名，退回用原始分类名找
             cid = _category_id_by_name(conn, alipay_category)
-        return cid
-    return None
+    if cid is None:
+        return (None, None)
+    row = conn.execute('SELECT parent_id FROM categories WHERE id=?', (cid,)).fetchone()
+    if row and row['parent_id'] is not None:
+        return (row['parent_id'], cid)
+    return (cid, None)
 
 
 def reclassify(conn):
-    """按最新规则重算全部历史交易的分类；手动指定过分类的(manual=1)不覆盖。
+    """按最新规则重算全部历史交易的一级/二级分类；手动指定过分类的(manual=1)不覆盖。
 
     返回本次发生变化的笔数。"""
     changed = 0
     for tx in conn.execute(
-            'SELECT id, counterparty, description, category_id, alipay_category '
-            'FROM transactions WHERE manual=0').fetchall():
-        new_cid = classify(conn, tx['counterparty'], tx['description'],
-                           tx['alipay_category'])
-        if new_cid != tx['category_id']:
-            conn.execute('UPDATE transactions SET category_id=? WHERE id=?',
-                         (new_cid, tx['id']))
+            'SELECT id, counterparty, description, category_id, subcategory_id,'
+            ' alipay_category FROM transactions WHERE manual=0').fetchall():
+        new_cid, new_sid = classify(conn, tx['counterparty'], tx['description'],
+                                    tx['alipay_category'])
+        if new_cid != tx['category_id'] or new_sid != tx['subcategory_id']:
+            conn.execute('UPDATE transactions SET category_id=?, subcategory_id=? WHERE id=?',
+                         (new_cid, new_sid, tx['id']))
             changed += 1
     conn.commit()
     return changed

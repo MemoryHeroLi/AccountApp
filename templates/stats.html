@@ -17,7 +17,13 @@
 <div class="grid-2">
   <div class="card"><div class="chart-title">月度消费对比</div><div id="chart-monthly" class="chart"></div></div>
   <div class="card"><div class="chart-title">月度趋势（含 3 月均线）</div><div id="chart-trend" class="chart"></div></div>
-  <div class="card"><div class="chart-title">类别占比</div><div id="chart-category" class="chart"></div></div>
+  <div class="card">
+    <div class="chart-title" style="display:flex;align-items:center;gap:10px">
+      <span id="cat-chart-title">类别占比</span>
+      <button class="btn-link" id="btn-drill-back" style="display:none">← 返回</button>
+    </div>
+    <div id="chart-category" class="chart"></div>
+  </div>
   <div class="card"><div class="chart-title">商家 / 交易对方 Top 10</div><div id="chart-merchant" class="chart"></div></div>
   <div class="card"><div class="chart-title">周内分布</div><div id="chart-weekday" class="chart"></div></div>
   <div class="card"><div class="chart-title">支付方式分布</div><div id="chart-paymethod" class="chart"></div></div>
@@ -32,10 +38,53 @@
 const $ = id => document.getElementById(id);
 const charts = {};
 const DOW = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+let subcatsMap = {};   // parent_name -> [{name, total}]
+let drillParent = null;  // 当前下钻的一级分类名，null = 未下钻
 
 function chart(id) {
   if (!charts[id]) charts[id] = echarts.init($(id));
   return charts[id];
+}
+
+function renderCategoryPie(d) {
+  const el = chart('chart-category');
+  if (drillParent) {
+    // 下钻模式：显示该一级分类下的二级分布
+    const subs = subcatsMap[drillParent] || [];
+    if (!subs.length) {
+      el.clear();
+      el.setOption({ title: { text: '无二级分类数据', left: 'center', top: 'center' } });
+      return;
+    }
+    const color = categoryColor(drillParent);
+    el.setOption({
+      tooltip: { trigger: 'item', formatter: '{b}: ¥{c} ({d}%)' },
+      series: [{ type: 'pie', radius: ['40%', '68%'],
+        data: subs.map(x => ({ name: x.name, value: x.total })),
+        label: { formatter: '{b}\n{d}%' },
+        itemStyle: { color } }],
+    }, true);
+  } else {
+    // 一级分类占比
+    el.setOption({
+      tooltip: { trigger: 'item', formatter: '{b}: ¥{c} ({d}%)' },
+      series: [{ type: 'pie', radius: ['40%', '68%'],
+        data: d.categories.map(x => ({ name: x.name, value: x.total })),
+        label: { formatter: '{b}\n{d}%' },
+        emphasis: { itemStyle: { shadowBlur: 10, shadowOffsetX: 0, shadowColor: 'rgba(0,0,0,0.5)' } } }],
+    }, true);
+    // 点击下钻
+    el.off('click');
+    el.on('click', params => {
+      const name = params.name;
+      if (subcatsMap[name] && subcatsMap[name].length) {
+        drillParent = name;
+        $('cat-chart-title').textContent = name + ' › 二级分布';
+        $('btn-drill-back').style.display = 'inline';
+        renderCategoryPie(d);
+      }
+    });
+  }
 }
 
 async function loadStats() {
@@ -53,6 +102,13 @@ async function loadStats() {
 
   const months = d.monthly.map(x => x.month);
   const totals = d.monthly.map(x => x.total);
+
+  // 构建 subcatsMap
+  subcatsMap = {};
+  d.subcats.forEach(x => {
+    if (!subcatsMap[x.parent]) subcatsMap[x.parent] = [];
+    subcatsMap[x.parent].push({ name: x.name, total: x.total });
+  });
 
   // 1. 月度对比（柱状）
   chart('chart-monthly').setOption({
@@ -79,13 +135,8 @@ async function loadStats() {
     grid: { left: 50, right: 20, top: 30, bottom: 30 },
   }, true);
 
-  // 3. 类别占比（环形）
-  chart('chart-category').setOption({
-    tooltip: { trigger: 'item', formatter: '{b}: ¥{c} ({d}%)' },
-    series: [{ type: 'pie', radius: ['40%', '68%'],
-      data: d.categories.map(x => ({ name: x.name, value: x.total })),
-      label: { formatter: '{b}\n{d}%' } }],
-  }, true);
+  // 3. 类别占比（环形 + 下钻）
+  renderCategoryPie(d);
 
   // 4. 商家 Top10（横向条形）
   const merch = [...d.merchants].reverse();
@@ -120,6 +171,14 @@ async function loadStats() {
       label: { formatter: '{b}\n{d}%' } }],
   }, true);
 }
+
+$('btn-drill-back').onclick = () => {
+  drillParent = null;
+  $('cat-chart-title').textContent = '类别占比';
+  $('btn-drill-back').style.display = 'none';
+  // 重新渲染一级，需要重新请求数据
+  loadStats();
+};
 
 async function init() {
   const d = await api('/api/stats');

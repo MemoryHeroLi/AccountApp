@@ -4,15 +4,25 @@
 <div class="card">
   <div class="page-title">类别管理</div>
   <div class="filters">
-    <input type="text" id="c-name" placeholder="新类别名称" style="width:180px">
-    <button class="btn btn-primary" id="btn-add-cat">+ 添加类别</button>
+    <div class="field">
+      <label>添加一级分类</label>
+      <div style="display:flex;gap:8px">
+        <input type="text" id="c-name" placeholder="一级分类名称" style="width:200px">
+        <button class="btn btn-primary" id="btn-add-top">添加</button>
+      </div>
+    </div>
+    <div class="field">
+      <label>添加二级分类</label>
+      <div style="display:flex;gap:8px">
+        <select id="c-parent" style="width:160px"><option value="">选择所属一级</option></select>
+        <input type="text" id="c-sub-name" placeholder="二级分类名称" style="width:160px">
+        <button class="btn btn-primary" id="btn-add-sub">添加</button>
+      </div>
+    </div>
   </div>
-
-  <table>
-    <thead><tr><th>类别</th><th class="num">交易笔数</th><th>操作</th></tr></thead>
-    <tbody id="cats-body"></tbody>
-  </table>
 </div>
+
+<div class="cat-grid" id="cat-grid"></div>
 {% endblock %}
 
 {% block scripts %}
@@ -23,15 +33,42 @@ let renamingId = null;
 
 async function load() {
   const data = await api('/api/categories');
-  $('cats-body').innerHTML = data.categories.map(c => `
-    <tr>
-      <td><span class="badge" style="background:${categoryColor(c.name)}1a;color:${categoryColor(c.name)};font-size:13px">${esc(c.name)}</span></td>
-      <td class="num">${c.cnt}</td>
-      <td style="white-space:nowrap">
-        <button class="btn-link" onclick="renameCat(${c.id},'${esc(c.name)}')">重命名</button>
-        <button class="btn-link danger" onclick="delCat(${c.id},${c.cnt})">删除</button>
-      </td>
-    </tr>`).join('');
+  const tops = data.categories.filter(c => !c.parent_id);
+  const subs = data.categories.filter(c => c.parent_id);
+
+  // 填充添加二级分类的下拉
+  $('c-parent').innerHTML = '<option value="">选择所属一级</option>' +
+    tops.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
+
+  // 渲染卡片
+  $('cat-grid').innerHTML = tops.map(top => {
+    const c = categoryColor(top.name);
+    const children = subs.filter(s => s.parent_id === top.id);
+    const topCnt = data.categories.find(x => x.id === top.id)?.cnt || 0;
+    return `<div class="cat-card" style="border-color:${c}44">
+      <div class="cat-card-header" style="background:${c}1a;color:${c};border-bottom:2px solid ${c}33">
+        <span class="cat-card-name">${esc(top.name)}</span>
+        <span class="cat-card-cnt">${topCnt} 笔</span>
+      </div>
+      <div class="cat-card-body">
+        ${children.length ? children.map(sub => {
+          const subCnt = data.categories.find(x => x.id === sub.id)?.cnt || 0;
+          return `<div class="cat-sub-row">
+            <span class="cat-sub-name">${esc(sub.name)}</span>
+            <span class="cat-card-cnt">${subCnt} 笔</span>
+            <span class="cat-sub-actions">
+              <button class="btn-link" onclick="renameCat(${sub.id},'${esc(sub.name)}')">重命名</button>
+              <button class="btn-link danger" onclick="delCat(${sub.id})">删除</button>
+            </span>
+          </div>`;
+        }).join('') : '<div class="cat-sub-row text-muted" style="font-size:12px;padding:6px 0">暂无二级分类</div>'}
+      </div>
+      <div class="cat-card-actions">
+        <button class="btn-link" onclick="renameCat(${top.id},'${esc(top.name)}')">重命名</button>
+        <button class="btn-link danger" onclick="delCat(${top.id})">删除</button>
+      </div>
+    </div>`;
+  }).join('') || '<div class="text-muted" style="text-align:center;padding:40px">暂无分类</div>';
 }
 
 window.renameCat = async (id, name) => {
@@ -44,8 +81,7 @@ window.renameCat = async (id, name) => {
   } catch (err) { toast(err.message, true); }
 };
 
-window.delCat = async (id, cnt) => {
-  if (cnt > 0) { toast('仍有交易使用该类别，无法删除', true); return; }
+window.delCat = async id => {
   if (!confirm('确定删除该类别？')) return;
   try {
     await api('/api/category/' + id, { method: 'DELETE' });
@@ -54,11 +90,25 @@ window.delCat = async (id, cnt) => {
   } catch (err) { toast(err.message, true); }
 };
 
-$('btn-add-cat').onclick = async () => {
-  if (!$('c-name').value.trim()) { toast('请输入类别名称', true); return; }
+$('btn-add-top').onclick = async () => {
+  const name = $('c-name').value.trim();
+  if (!name) { toast('请输入一级分类名称', true); return; }
   try {
-    await api('/api/categories', { method: 'POST', body: { name: $('c-name').value } });
+    await api('/api/categories', { method: 'POST', body: { name } });
     $('c-name').value = '';
+    toast('已添加');
+    load();
+  } catch (err) { toast(err.message, true); }
+};
+
+$('btn-add-sub').onclick = async () => {
+  const name = $('c-sub-name').value.trim();
+  const parent_id = $('c-parent').value;
+  if (!name) { toast('请输入二级分类名称', true); return; }
+  if (!parent_id) { toast('请选择所属一级分类', true); return; }
+  try {
+    await api('/api/categories', { method: 'POST', body: { name, parent_id: Number(parent_id) } });
+    $('c-sub-name').value = '';
     toast('已添加');
     load();
   } catch (err) { toast(err.message, true); }

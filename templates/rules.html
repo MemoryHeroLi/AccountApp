@@ -4,14 +4,15 @@
 <div class="card">
   <div class="page-title">分类规则</div>
   <p class="small text-muted" style="margin-bottom:14px">
-    规则按顺序匹配（关键词包含于“交易对方 + 商品说明”即命中），第一条命中的生效；
-    未命中且来自支付宝的账单使用支付宝自带分类；再未命中则进入“待分类”。
-    修改规则后请点击“重新归类”使历史交易生效（手动指定过分类的交易不会被覆盖）。
+    规则按顺序匹配（关键词包含于"交易对方 + 商品说明"即命中），第一条命中的生效；
+    未命中且来自支付宝的账单使用支付宝自带分类；再未命中则进入"待分类"。
+    修改规则后请点击"重新归类"使历史交易生效（手动指定过分类的交易不会被覆盖）。
   </p>
 
   <div class="filters">
-    <input type="text" id="r-keyword" placeholder="关键词" style="width:180px">
-    <select id="r-category"></select>
+    <input type="text" id="r-keyword" placeholder="关键词" style="width:160px">
+    <select id="r-category"><option value="">请选择一级分类</option></select>
+    <select id="r-subcategory"><option value="">（无二级分类）</option></select>
     <button class="btn btn-primary" id="btn-add-rule">+ 添加规则</button>
     <div class="spacer"></div>
     <button class="btn" id="btn-reclassify">↻ 重新归类</button>
@@ -19,7 +20,7 @@
 
   <table>
     <thead><tr>
-      <th style="width:40px">#</th><th>关键词</th><th>类别</th>
+      <th style="width:40px">#</th><th>关键词</th><th>一级分类</th><th>二级分类</th>
       <th>状态</th><th>操作</th>
     </tr></thead>
     <tbody id="rules-body"></tbody>
@@ -31,7 +32,8 @@
   <div class="modal">
     <h3>编辑规则</h3>
     <div class="form-row"><label>关键词</label><input type="text" id="er-keyword"></div>
-    <div class="form-row"><label>类别</label><select id="er-category"></select></div>
+    <div class="form-row"><label>一级分类</label><select id="er-category"><option value="">请选择一级分类</option></select></div>
+    <div class="form-row"><label>二级分类（可选）</label><select id="er-subcategory"><option value="">（无二级分类）</option></select></div>
     <div class="actions">
       <button class="btn" onclick="document.getElementById('modal-edit-rule').classList.remove('show')">取消</button>
       <button class="btn btn-primary" id="btn-edit-rule-save">保存</button>
@@ -43,20 +45,24 @@
 {% block scripts %}
 <script src="{{ url_for('static', filename='app.js') }}"></script>
 <script>
-const $ = id => document.getElementById(id);
+let CATEGORIES = [];
 let editingRuleId = null;
+
+const $ = id => document.getElementById(id);
 
 async function load() {
   const [meta, data] = await Promise.all([api('/api/meta'), api('/api/rules')]);
-  const opts = meta.categories.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
-  $('r-category').innerHTML = opts;
-  $('er-category').innerHTML = opts;
+  CATEGORIES = meta.categories;
+  $('r-category').innerHTML = '<option value="">请选择一级分类</option>' + topOptions(CATEGORIES);
+  $('er-category').innerHTML = '<option value="">请选择一级分类</option>' + topOptions(CATEGORIES);
 
-  $('rules-body').innerHTML = data.rules.map((r, i) => `
-    <tr>
+  $('rules-body').innerHTML = data.rules.map((r, i) => {
+    const topName = r.parent_name || r.category_name;
+    const subName = r.parent_name ? r.category_name : '';
+    return `<tr>
       <td class="text-muted">${i + 1}</td>
       <td><code>${esc(r.keyword)}</code></td>
-      <td><span class="badge" style="background:${categoryColor(r.category_name)}1a;color:${categoryColor(r.category_name)}">${esc(r.category_name)}</span></td>
+      ${catCells(topName, subName)}
       <td>${r.enabled ? '<span class="badge refund">启用</span>' : '<span class="badge pending">停用</span>'}</td>
       <td style="white-space:nowrap">
         <button class="btn-link" onclick="moveRule(${r.id},'up')">上移</button>
@@ -65,8 +71,15 @@ async function load() {
         <button class="btn-link" onclick="openEditRule(${r.id})">编辑</button>
         <button class="btn-link danger" onclick="delRule(${r.id})">删除</button>
       </td>
-    </tr>`).join('');
+    </tr>`;
+  }).join('') || '<tr><td colspan="6" class="text-muted" style="text-align:center;padding:30px">暂无规则</td></tr>';
 }
+
+// 级联：添加规则
+$('r-category').onchange = () => fillSub($('r-subcategory'), CATEGORIES, Number($('r-category').value), '');
+
+// 级联：编辑规则弹窗
+$('er-category').onchange = () => fillSub($('er-subcategory'), CATEGORIES, Number($('er-category').value), '');
 
 window.moveRule = async (id, dir) => {
   await api(`/api/rule/${id}/move`, { method: 'POST', body: { dir } });
@@ -88,17 +101,30 @@ window.openEditRule = async id => {
   if (!rule) return;
   editingRuleId = id;
   $('er-keyword').value = rule.keyword;
-  $('er-category').value = rule.category_id;
+  if (rule.parent_id) {
+    // 规则指向二级分类
+    $('er-category').value = rule.parent_id;
+    fillSub($('er-subcategory'), CATEGORIES, rule.parent_id, rule.category_id);
+  } else {
+    $('er-category').value = rule.category_id;
+    fillSub($('er-subcategory'), CATEGORIES, rule.category_id, '');
+  }
   $('modal-edit-rule').classList.add('show');
 };
 
 $('btn-add-rule').onclick = async () => {
   if (!$('r-keyword').value.trim()) { toast('请输入关键词', true); return; }
+  if (!$('r-category').value) { toast('请选择一级分类', true); return; }
   try {
     await api('/api/rules', { method: 'POST', body: {
-      keyword: $('r-keyword').value, category_id: $('r-category').value } });
+      keyword: $('r-keyword').value,
+      category_id: $('r-category').value,
+      subcategory_id: $('r-subcategory').value,
+    }});
     $('r-keyword').value = '';
-    toast('规则已添加，记得“重新归类”使其生效');
+    $('r-category').value = '';
+    $('r-subcategory').innerHTML = '<option value="">（无二级分类）</option>';
+    toast('规则已添加，记得"重新归类"使其生效');
     load();
   } catch (err) { toast(err.message, true); }
 };
@@ -106,9 +132,12 @@ $('btn-add-rule').onclick = async () => {
 $('btn-edit-rule-save').onclick = async () => {
   try {
     await api('/api/rule/' + editingRuleId, { method: 'POST', body: {
-      keyword: $('er-keyword').value, category_id: $('er-category').value } });
+      keyword: $('er-keyword').value,
+      category_id: $('er-category').value,
+      subcategory_id: $('er-subcategory').value,
+    }});
     $('modal-edit-rule').classList.remove('show');
-    toast('已保存，记得“重新归类”使其生效');
+    toast('已保存，记得"重新归类"使其生效');
     load();
   } catch (err) { toast(err.message, true); }
 };
