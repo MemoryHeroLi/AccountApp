@@ -248,12 +248,27 @@ def create_app():
     @app.get('/api/calendar')
     def api_calendar():
         month = request.args.get('month', datetime.now().strftime('%Y-%m'))
+        category = request.args.get('category', '').strip()
+        subcategory = request.args.get('subcategory', '').strip()
+        bookkeeper = request.args.get('bookkeeper', '').strip()
+
+        sql = ("SELECT substr(tx_time,1,10) AS d, ROUND(SUM(amount),2) AS total,"
+               " COUNT(*) AS cnt FROM transactions WHERE tx_time LIKE ?")
+        params = [month + '-%']
+        if category:
+            sql += ' AND category_id = ?'
+            params.append(int(category))
+        if subcategory:
+            sql += ' AND subcategory_id = ?'
+            params.append(int(subcategory))
+        if bookkeeper:
+            sql += ' AND bookkeeper = ?'
+            params.append(bookkeeper)
+        sql += ' GROUP BY d'
+
         conn = get_db()
         days = {}
-        for r in conn.execute(
-                "SELECT substr(tx_time,1,10) AS d, ROUND(SUM(amount),2) AS total,"
-                " COUNT(*) AS cnt FROM transactions WHERE tx_time LIKE ?"
-                " GROUP BY d", (month + '-%',)):
+        for r in conn.execute(sql, params):
             days[r['d']] = {'total': r['total'], 'cnt': r['cnt']}
         conn.close()
 
@@ -273,13 +288,29 @@ def create_app():
         d = request.args.get('date', '')
         if len(d) != 10:
             return jsonify({'error': '日期格式错误'}), 400
+        category = request.args.get('category', '').strip()
+        subcategory = request.args.get('subcategory', '').strip()
+        bookkeeper = request.args.get('bookkeeper', '').strip()
+
+        sql = ('SELECT t.*, c.name AS category_name, s.name AS subcategory_name '
+               'FROM transactions t '
+               'LEFT JOIN categories c ON c.id=t.category_id '
+               'LEFT JOIN categories s ON s.id=t.subcategory_id '
+               'WHERE t.tx_time LIKE ?')
+        params = [d + '%']
+        if category:
+            sql += ' AND t.category_id = ?'
+            params.append(int(category))
+        if subcategory:
+            sql += ' AND t.subcategory_id = ?'
+            params.append(int(subcategory))
+        if bookkeeper:
+            sql += ' AND t.bookkeeper = ?'
+            params.append(bookkeeper)
+        sql += ' ORDER BY t.tx_time'
+
         conn = get_db()
-        rows = [tx_to_dict(r) for r in conn.execute(
-            'SELECT t.*, c.name AS category_name, s.name AS subcategory_name '
-            'FROM transactions t '
-            'LEFT JOIN categories c ON c.id=t.category_id '
-            'LEFT JOIN categories s ON s.id=t.subcategory_id '
-            'WHERE t.tx_time LIKE ? ORDER BY t.tx_time', (d + '%',))]
+        rows = [tx_to_dict(r) for r in conn.execute(sql, params)]
         conn.close()
         return jsonify({'transactions': rows,
                         'total': round(sum(r['amount'] for r in rows), 2)})
