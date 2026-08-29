@@ -19,6 +19,8 @@
         <button class="btn btn-primary" id="btn-add-sub">添加</button>
       </div>
     </div>
+    <div class="spacer"></div>
+    <button class="btn" id="btn-export">⬇ 导出 Excel 备份</button>
   </div>
 </div>
 
@@ -113,6 +115,8 @@ $('btn-add-sub').onclick = async () => {
     load();
   } catch (err) { toast(err.message, true); }
 };
+
+$('btn-export').onclick = () => window.location = '/api/export/backup';
 
 load();
 </script>

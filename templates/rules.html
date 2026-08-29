@@ -15,6 +15,7 @@
     <select id="r-subcategory"><option value="">（无二级分类）</option></select>
     <button class="btn btn-primary" id="btn-add-rule">+ 添加规则</button>
     <div class="spacer"></div>
+    <button class="btn" id="btn-export">⬇ 导出 Excel 备份</button>
     <button class="btn" id="btn-reclassify">↻ 重新归类</button>
   </div>
 
@@ -146,6 +147,8 @@ $('btn-reclassify').onclick = async () => {
   const data = await api('/api/reclassify', { method: 'POST', body: {} });
   toast(`重新归类完成：${data.changed} 笔交易分类有变化`);
 };
+
+$('btn-export').onclick = () => window.location = '/api/export/backup';
 
 load();
 </script>

@@ -1,9 +1,11 @@
 """Flask 应用：页面路由 + JSON API。"""
 import calendar as cal
+import io
 import uuid
 from datetime import date, datetime
 
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, render_template, request, send_file
+from openpyxl import Workbook
 
 import classifier
 import importers
@@ -572,5 +574,49 @@ def create_app():
         conn.commit()
         conn.close()
         return jsonify({'ok': True})
+
+    # ---------------- 备份导出（类别 + 规则 → 一份 Excel 两个工作表） ----------------
+    @app.get('/api/export/backup')
+    def api_export_backup():
+        conn = get_db()
+        cats = [dict(r) for r in conn.execute(
+            'SELECT c.id, c.name, c.parent_id,'
+            ' (SELECT COUNT(*) FROM transactions t'
+            '  WHERE t.category_id=c.id OR t.subcategory_id=c.id) AS cnt'
+            ' FROM categories c ORDER BY c.id')]
+        rules = [dict(r) for r in conn.execute(
+            'SELECT r.keyword, r.enabled, r.sort_order,'
+            ' c.name AS category_name, p.name AS parent_name'
+            ' FROM rules r JOIN categories c ON c.id=r.category_id'
+            ' LEFT JOIN categories p ON p.id=c.parent_id'
+            ' ORDER BY r.sort_order, r.id')]
+        conn.close()
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = '类别管理'
+        ws.append(['一级分类', '二级分类', '交易笔数'])
+        for c in cats:
+            if c['parent_id'] is None:
+                ws.append([c['name'], '', c['cnt']])
+            else:
+                parent = next((x['name'] for x in cats
+                               if x['id'] == c['parent_id']), '')
+                ws.append([parent, c['name'], c['cnt']])
+        ws2 = wb.create_sheet('分类规则')
+        ws2.append(['排序', '关键词', '一级分类', '二级分类', '状态'])
+        for r in rules:
+            ws2.append([r['sort_order'] + 1, r['keyword'],
+                        r['parent_name'] or r['category_name'],
+                        r['category_name'] if r['parent_name'] else '',
+                        '启用' if r['enabled'] else '停用'])
+
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+        return send_file(
+            buf, as_attachment=True,
+            download_name=f'记账配置备份_{date.today()}.xlsx',
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
     return app
