@@ -3,7 +3,7 @@ cd /d "%~dp0"
 title Ledger-App
 
 echo Step 1/2: Clean up old process...
-powershell -Command "$p = netstat -ano | findstr '127.0.0.1:5000' | findstr 'LISTENING'; if ($p) { $pid = $p.Trim().Split()[-1]; taskkill /F /PID $pid >$null 2>&1 }"
+powershell -Command "$p = netstat -ano | findstr '127.0.0.1:5000' | findstr 'LISTENING'; if ($p) { $portPid = $p.Trim().Split()[-1]; taskkill /F /PID $portPid >$null 2>&1 }"
 
 echo Step 2/2: Starting app...
 
