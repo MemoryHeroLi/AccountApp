@@ -26,15 +26,17 @@
     <button class="btn btn-primary" id="btn-add">+ 手动记账</button>
   </div>
 
-  <table>
-    <thead>
-      <tr>
-        <th>时间</th><th>来源</th><th>交易对方</th><th>商品说明</th>
-        <th>一级分类</th><th>二级分类</th><th class="num">金额</th><th>支付方式</th><th class="bookkeeper">记账人</th><th>操作</th>
-      </tr>
-    </thead>
-    <tbody id="tx-body"></tbody>
-  </table>
+  <div style="overflow-x:auto">
+    <table class="tx-table">
+      <thead>
+        <tr>
+          <th width="12%">时间</th><th>来源</th><th width="18%" class="party">交易对方</th><th width="18%" class="goods">商品说明</th>
+          <th>一级分类</th><th>二级分类</th><th class="num">金额</th><th>支付方式</th><th class="bookkeeper">记账人</th><th width="9%">操作</th>
+        </tr>
+      </thead>
+      <tbody id="tx-body"></tbody>
+    </table>
+  </div>
 </div>
 
 <!-- 手动记账 -->
@@ -176,8 +178,8 @@ async function load() {
     <tr>
       <td class="small" style="white-space:nowrap">${esc(t.tx_time)}</td>
       <td>${sourceBadge(t)}</td>
-      <td>${esc(t.counterparty) || '<span class="text-muted">-</span>'}</td>
-      <td class="small">${esc(t.description)}</td>
+      <td class="party">${esc(t.counterparty) || '<span class="text-muted">-</span>'}</td>
+      <td class="small goods">${esc(t.description)}</td>
       ${catCells(t.category_name, t.subcategory_name)}
       <td class="num">${amountCell(t)}${t.refund_amount > 0 ? ' <span class="badge refund">退款</span>' : ''}</td>
       <td class="small text-muted">${esc(t.pay_method) || '-'}</td>

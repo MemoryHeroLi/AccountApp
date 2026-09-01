@@ -68,6 +68,11 @@ th.bookkeeper, td.bookkeeper { width: 5em; white-space: nowrap; }
 .text-muted { color: #9aa4ab; }
 .small { font-size: 12px; }
 
+/* 交易明细表格固定列宽，避免撑破布局 */
+.tx-table { width: 100%; table-layout: fixed; }
+.tx-table .party,
+.tx-table .goods { word-break: break-word; }
+
 /* ---- 徽章 ---- */
 .badge {
   display: inline-block; padding: 1px 9px; border-radius: 999px;
