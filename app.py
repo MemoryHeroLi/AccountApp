@@ -45,6 +45,10 @@ def create_app():
     def page_categories():
         return render_template('categories.html', active='categories')
 
+    @app.get('/bookkeepers')
+    def page_bookkeepers():
+        return render_template('bookkeepers.html', active='bookkeepers')
+
     # ---------------- 导入 ----------------
     @app.post('/api/import')
     def api_import():
@@ -63,6 +67,7 @@ def create_app():
         except Exception as e:
             return jsonify({'error': f'解析失败: {e}'}), 400
 
+        bookkeeper = request.form.get('bookkeeper', '').strip() or DEFAULT_BOOKKEEPER
         conn = get_db()
         imported = 0
         for tx in txs:
@@ -76,7 +81,7 @@ def create_app():
                 ' VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
                 (tx['order_no'], source, tx['tx_time'], tx['counterparty'],
                  tx['description'], tx['amount'], tx['refund_amount'],
-                 tx['pay_method'], cid, sid, DEFAULT_BOOKKEEPER, tx['alipay_category']))
+                 tx['pay_method'], cid, sid, bookkeeper, tx['alipay_category']))
             imported += cur.rowcount
         conn.commit()
         conn.close()
@@ -93,7 +98,8 @@ def create_app():
         categories = [dict(r) for r in conn.execute(
             'SELECT id, name, parent_id FROM categories ORDER BY id')]
         bookkeepers = [r[0] for r in conn.execute(
-            "SELECT DISTINCT bookkeeper FROM transactions "
+            "SELECT name FROM bookkeepers "
+            "UNION SELECT DISTINCT bookkeeper FROM transactions "
             "WHERE bookkeeper != '' ORDER BY 1")]
         pending = conn.execute(
             'SELECT COUNT(*) FROM transactions WHERE category_id IS NULL').fetchone()[0]
@@ -571,6 +577,50 @@ def create_app():
                                          f'请先改分类后再删除'}), 400
             conn.execute('DELETE FROM rules WHERE category_id=?', (cat_id,))
             conn.execute('DELETE FROM categories WHERE id=?', (cat_id,))
+        conn.commit()
+        conn.close()
+        return jsonify({'ok': True})
+
+    # ---------------- 记账人管理 ----------------
+    @app.get('/api/bookkeepers')
+    def api_bookkeepers():
+        conn = get_db()
+        bks = [dict(r) for r in conn.execute(
+            'SELECT b.id, b.name,'
+            ' (SELECT COUNT(*) FROM transactions t WHERE t.bookkeeper=b.name) AS cnt'
+            ' FROM bookkeepers b ORDER BY b.id')]
+        conn.close()
+        return jsonify({'bookkeepers': bks})
+
+    @app.post('/api/bookkeepers')
+    def api_add_bookkeeper():
+        name = (request.get_json(force=True).get('name') or '').strip()
+        if not name:
+            return jsonify({'error': '记账人名称不能为空'}), 400
+        conn = get_db()
+        try:
+            conn.execute('INSERT INTO bookkeepers(name) VALUES (?)', (name,))
+            conn.commit()
+        except Exception:
+            conn.close()
+            return jsonify({'error': '记账人已存在'}), 400
+        conn.close()
+        return jsonify({'ok': True})
+
+    @app.delete('/api/bookkeeper/<int:bk_id>')
+    def api_delete_bookkeeper(bk_id):
+        conn = get_db()
+        row = conn.execute('SELECT name FROM bookkeepers WHERE id=?', (bk_id,)).fetchone()
+        if not row:
+            conn.close()
+            return jsonify({'error': '记账人不存在'}), 404
+        cnt = conn.execute('SELECT COUNT(*) FROM transactions WHERE bookkeeper=?',
+                           (row['name'],)).fetchone()[0]
+        if cnt > 0:
+            conn.close()
+            return jsonify({'error': f'仍有 {cnt} 笔交易记在此人名下，'
+                                     f'请先改掉这些交易的记账人'}), 400
+        conn.execute('DELETE FROM bookkeepers WHERE id=?', (bk_id,))
         conn.commit()
         conn.close()
         return jsonify({'ok': True})

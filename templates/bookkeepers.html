@@ -1,0 +1,57 @@
+{% extends 'base.html' %}
+{% block title %}记账人 - 记账本{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="page-title">记账人管理</div>
+  <p class="small text-muted" style="margin-bottom:14px">
+    记账人用于区分是谁记的账，导入账单和手动记账时都可指定。
+    删除记账人前需先改掉其名下交易的记账人。
+  </p>
+  <div class="filters">
+    <input type="text" id="bk-name" placeholder="记账人名称" style="width:160px">
+    <button class="btn btn-primary" id="btn-add">+ 添加记账人</button>
+  </div>
+  <table>
+    <thead><tr><th>记账人</th><th>名下交易笔数</th><th>操作</th></tr></thead>
+    <tbody id="bk-body"></tbody>
+  </table>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='app.js') }}?v=1"></script>
+<script>
+const $ = id => document.getElementById(id);
+
+async function load() {
+  const data = await api('/api/bookkeepers');
+  $('bk-body').innerHTML = data.bookkeepers.map(b => `<tr>
+    <td>${esc(b.name)}</td>
+    <td class="text-muted">${b.cnt} 笔</td>
+    <td style="white-space:nowrap"><button class="btn-link danger" onclick="delBk(${b.id})">删除</button></td>
+  </tr>`).join('') || '<tr><td colspan="3" class="text-muted" style="text-align:center;padding:30px">暂无记账人</td></tr>';
+}
+
+window.delBk = async id => {
+  if (!confirm('确定删除该记账人？')) return;
+  try {
+    await api('/api/bookkeeper/' + id, { method: 'DELETE' });
+    toast('已删除');
+    load();
+  } catch (err) { toast(err.message, true); }
+};
+
+$('btn-add').onclick = async () => {
+  const name = $('bk-name').value.trim();
+  if (!name) { toast('请输入记账人名称', true); return; }
+  try {
+    await api('/api/bookkeepers', { method: 'POST', body: { name } });
+    $('bk-name').value = '';
+    toast('已添加');
+    load();
+  } catch (err) { toast(err.message, true); }
+};
+
+load();
+</script>
+{% endblock %}

@@ -21,6 +21,7 @@
     <div class="spacer"></div>
     <span class="small text-muted" id="summary"></span>
     <input type="file" id="file-import" accept=".xlsx,.csv" hidden>
+    <select id="import-bookkeeper" style="width:110px"></select>
     <button class="btn" id="btn-import">导入账单</button>
     <button class="btn btn-primary" id="btn-add">+ 手动记账</button>
   </div>
@@ -45,7 +46,7 @@
     <div class="form-row"><label>类别（一级）*</label><select id="add-category"></select></div>
     <div class="form-row"><label>二级分类（可选）</label><select id="add-subcategory"><option value="">（无二级分类）</option></select></div>
     <div class="form-row"><label>支付方式（可选，如"现金"）</label><input type="text" id="add-pay"></div>
-    <div class="form-row"><label>记账人</label><input type="text" id="add-bookkeeper" value="旺仔爹地"></div>
+    <div class="form-row"><label>记账人</label><select id="add-bookkeeper"></select></div>
     <div class="form-row"><label>描述（可选）</label><input type="text" id="add-desc"></div>
     <div class="actions">
       <button class="btn" onclick="closeModal('modal-add')">取消</button>
@@ -63,7 +64,7 @@
     <div class="form-row"><label>类别（一级）*</label><select id="edit-category"></select></div>
     <div class="form-row"><label>二级分类（可选）</label><select id="edit-subcategory"><option value="">（无二级分类）</option></select></div>
     <div class="form-row"><label>支付方式</label><input type="text" id="edit-pay"></div>
-    <div class="form-row"><label>记账人</label><input type="text" id="edit-bookkeeper"></div>
+    <div class="form-row"><label>记账人</label><select id="edit-bookkeeper"></select></div>
     <div class="form-row"><label>描述</label><input type="text" id="edit-desc"></div>
     <div class="form-row check">
       <input type="checkbox" id="edit-add-rule">
@@ -130,6 +131,14 @@ async function loadMeta() {
   $('f-category').onchange = rebuildSubFilter;
   $('f-bookkeeper').innerHTML = '<option value="">全部记账人</option>' +
     meta.bookkeepers.map(b => `<option value="${esc(b)}">${esc(b)}</option>`).join('');
+  $('import-bookkeeper').innerHTML = meta.bookkeepers.map(b =>
+    `<option value="${esc(b)}">${esc(b)}</option>`).join('');
+  $('import-bookkeeper').value = '旺仔爹地';
+  $('add-bookkeeper').innerHTML = meta.bookkeepers.map(b =>
+    `<option value="${esc(b)}">${esc(b)}</option>`).join('');
+  $('add-bookkeeper').value = '旺仔爹地';
+  $('edit-bookkeeper').innerHTML = meta.bookkeepers.map(b =>
+    `<option value="${esc(b)}">${esc(b)}</option>`).join('');
   $('add-category').innerHTML = '<option value="">待分类</option>' + topOptions(CATEGORIES);
   $('edit-category').innerHTML = '<option value="">待分类</option>' + topOptions(CATEGORIES);
 
@@ -211,6 +220,7 @@ $('file-import').onchange = async e => {
   if (!file) return;
   const fd = new FormData();
   fd.append('file', file);
+  fd.append('bookkeeper', $('import-bookkeeper').value);
   try {
     const res = await fetch('/api/import', { method: 'POST', body: fd });
     const data = await res.json();

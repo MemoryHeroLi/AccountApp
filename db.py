@@ -65,6 +65,11 @@ CREATE TABLE IF NOT EXISTS rules (
     sort_order  INTEGER NOT NULL DEFAULT 0
 );
 
+CREATE TABLE IF NOT EXISTS bookkeepers (
+    id   INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT UNIQUE NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS transactions (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
     order_no         TEXT UNIQUE,             -- 交易单号，用于去重；手动记账为 NULL
@@ -145,6 +150,9 @@ def init_db():
         else:
             conn.execute('INSERT INTO rules(keyword, category_id) VALUES (?,?)',
                          (keyword, target_id))
+    # 记账人注册表（下拉数据源，预置两位记账人）
+    for name in ('旺仔爹地', '王女士'):
+        conn.execute('INSERT OR IGNORE INTO bookkeepers(name) VALUES (?)', (name,))
     # 初始化排序号
     ids = [r['id'] for r in conn.execute('SELECT id FROM rules ORDER BY id')]
     for i, rid in enumerate(ids):
