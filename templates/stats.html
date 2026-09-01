@@ -8,9 +8,9 @@
     <select id="s-start"></select>
     <label>结束月份</label>
     <select id="s-end"></select>
-    <select id="s-category"><option value="">全部类别</option></select>
-    <select id="s-subcategory"><option value="">全部二级分类</option></select>
-    <select id="s-bookkeeper"><option value="">全部记账人</option></select>
+    <div id="s-category"></div>
+    <div id="s-subcategory"></div>
+    <div id="s-bookkeeper"></div>
     <button class="btn btn-primary" id="btn-query">查询</button>
     <button class="btn" id="btn-reset">重置</button>
     <div class="spacer"></div>
@@ -37,7 +37,7 @@
 {% block scripts %}
 <script src="{{ url_for('static', filename='echarts.min.js') }}?v=1"></script>
 <script>window.echarts || document.write('<script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"><\/script>')</script>
-<script src="{{ url_for('static', filename='app.js') }}?v=1"></script>
+<script src="{{ url_for('static', filename='app.js') }}?v=2"></script>
 <script>
 const $ = id => document.getElementById(id);
 const charts = {};
@@ -46,24 +46,30 @@ let CATEGORIES = [];
 let subcatsMap = {};   // parent_name -> [{name, total}]
 let drillParent = null;  // 当前下钻的一级分类名，null = 未下钻
 
+const catFilter = multiSelect($('s-category'), { placeholder: '全部类别', onChange: () => { rebuildSubFilter(); resetDrill(); } });
+const subFilter = multiSelect($('s-subcategory'), { placeholder: '全部二级分类', onChange: resetDrill });
+const bkFilter = multiSelect($('s-bookkeeper'), { placeholder: '全部记账人' });
+subFilter.setDisabled('请先选择一级分类');
+
+function resetDrill() {
+  drillParent = null;
+  $('cat-chart-title').textContent = '类别占比';
+  $('btn-drill-back').style.display = 'none';
+}
+
 function chart(id) {
   if (!charts[id]) charts[id] = echarts.init($(id));
   return charts[id];
 }
 
 function rebuildSubFilter() {
-  const sel = $('s-subcategory');
-  const v = $('s-category').value;
-  if (!v) {
-    sel.disabled = true;
-    sel.innerHTML = '<option value="">请先选择一级分类</option>';
+  const tops = catFilter.values().map(Number);
+  if (!tops.length) {
+    subFilter.setDisabled('请先选择一级分类');
     return;
   }
-  sel.disabled = false;
-  const topId = Number(v);
-  const subs = CATEGORIES.filter(c => c.parent_id === topId);
-  sel.innerHTML = '<option value="">全部二级分类</option>' +
-    subs.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
+  const subs = CATEGORIES.filter(c => tops.includes(c.parent_id));
+  subFilter.setOptions(subs.map(s => ({ value: s.id, label: s.name })));
 }
 
 function renderCategoryPie(d) {
@@ -108,9 +114,9 @@ async function loadStats() {
   const qs = new URLSearchParams();
   if ($('s-start').value) qs.set('start', $('s-start').value);
   if ($('s-end').value) qs.set('end', $('s-end').value);
-  if ($('s-category').value) qs.set('category', $('s-category').value);
-  if ($('s-subcategory').value) qs.set('subcategory', $('s-subcategory').value);
-  if ($('s-bookkeeper').value) qs.set('bookkeeper', $('s-bookkeeper').value);
+  catFilter.values().forEach(v => qs.append('category', v));
+  subFilter.values().forEach(v => qs.append('subcategory', v));
+  bkFilter.values().forEach(v => qs.append('bookkeeper', v));
   const d = await api('/api/stats?' + qs);
   if (!d.monthly.length) {
     Object.values(charts).forEach(c => c.clear());
@@ -192,23 +198,8 @@ async function loadStats() {
 }
 
 $('btn-drill-back').onclick = () => {
-  drillParent = null;
-  $('cat-chart-title').textContent = '类别占比';
-  $('btn-drill-back').style.display = 'none';
+  resetDrill();
   loadStats();
-};
-
-$('s-category').onchange = () => {
-  rebuildSubFilter();
-  drillParent = null;
-  $('cat-chart-title').textContent = '类别占比';
-  $('btn-drill-back').style.display = 'none';
-};
-
-$('s-subcategory').onchange = () => {
-  drillParent = null;
-  $('cat-chart-title').textContent = '类别占比';
-  $('btn-drill-back').style.display = 'none';
 };
 
 async function init() {
@@ -220,11 +211,11 @@ async function init() {
   $('s-end').innerHTML = monthOpts;
   if (d.months.length) $('s-end').value = d.months[d.months.length - 1];
 
-  $('s-category').innerHTML = '<option value="">全部类别</option>' + topOptions(CATEGORIES);
+  catFilter.setOptions(CATEGORIES
+    .filter(c => !c.parent_id)
+    .map(c => ({ value: c.id, label: c.name })));
   rebuildSubFilter();
-
-  $('s-bookkeeper').innerHTML = '<option value="">全部记账人</option>' +
-    meta.bookkeepers.map(b => `<option value="${esc(b)}">${esc(b)}</option>`).join('');
+  bkFilter.setOptions(meta.bookkeepers.map(b => ({ value: b, label: b })));
 
   loadStats();
   window.addEventListener('resize', () =>
@@ -235,12 +226,10 @@ $('btn-query').onclick = loadStats;
 $('btn-reset').onclick = () => {
   $('s-start').value = '';
   $('s-end').value = '';
-  $('s-category').value = '';
+  catFilter.clear();
   rebuildSubFilter();
-  $('s-bookkeeper').value = '';
-  drillParent = null;
-  $('cat-chart-title').textContent = '类别占比';
-  $('btn-drill-back').style.display = 'none';
+  bkFilter.clear();
+  resetDrill();
   loadStats();
 };
 init();

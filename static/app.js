@@ -73,6 +73,75 @@ function fillSub(sel, cats, topId, subId) {
   if (subId) sel.value = String(subId);
 }
 
+// 多选下拉组件（消费日历/统计分析筛选栏共用）
+// 用法：const ms = multiSelect(el, {placeholder: '全部类别', onChange: fn})
+//       ms.setOptions([{value, label}, ...]) / ms.setDisabled('提示文字') / ms.values() / ms.clear()
+function multiSelect(el, { placeholder = '全部', onChange = null } = {}) {
+  el.classList.add('msel');
+  el.innerHTML =
+    '<button type="button" class="msel-btn"><span class="msel-label"></span><span class="msel-arrow">▾</span></button>' +
+    '<div class="msel-panel"></div>';
+  const btn = el.querySelector('.msel-btn');
+  const label = el.querySelector('.msel-label');
+  const panel = el.querySelector('.msel-panel');
+  let items = [];
+  let selected = new Set();   // 存字符串形式的 value
+  let disabled = false;
+
+  function render() {
+    const chosen = items.filter(it => selected.has(String(it.value)));
+    label.textContent = !chosen.length ? placeholder
+      : chosen.length <= 2 ? chosen.map(c => c.label).join('、')
+      : `已选 ${chosen.length} 项`;
+    panel.innerHTML = items.map(it => `
+      <label class="msel-item">
+        <input type="checkbox" value="${esc(it.value)}"${selected.has(String(it.value)) ? ' checked' : ''}>
+        <span>${esc(it.label)}</span>
+      </label>`).join('');
+  }
+
+  btn.onclick = () => {
+    if (disabled) return;
+    document.querySelectorAll('.msel.open').forEach(m => {
+      if (m !== el) m.classList.remove('open');
+    });
+    el.classList.toggle('open');
+  };
+  panel.onchange = e => {
+    if (e.target.checked) selected.add(e.target.value);
+    else selected.delete(e.target.value);
+    render();
+    if (onChange) onChange();
+  };
+  document.addEventListener('click', e => {
+    if (!el.contains(e.target)) el.classList.remove('open');
+  });
+
+  return {
+    setOptions(next) {
+      items = next;
+      const valid = new Set(next.map(it => String(it.value)));
+      selected = new Set([...selected].filter(v => valid.has(v)));  // 保留仍存在的勾选
+      disabled = false;
+      el.classList.remove('disabled');
+      btn.disabled = false;
+      render();
+    },
+    setDisabled(text) {
+      items = [];
+      selected.clear();
+      disabled = true;
+      el.classList.add('disabled');
+      btn.disabled = true;
+      label.textContent = text;
+      panel.innerHTML = '';
+      el.classList.remove('open');
+    },
+    values() { return [...selected]; },
+    clear() { selected.clear(); render(); },
+  };
+}
+
 function sourceBadge(tx) {
   return `<span class="badge src-${tx.source}">${esc(tx.source_name)}</span>`;
 }

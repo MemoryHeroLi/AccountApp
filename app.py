@@ -256,22 +256,22 @@ def create_app():
     @app.get('/api/calendar')
     def api_calendar():
         month = request.args.get('month', datetime.now().strftime('%Y-%m'))
-        category = request.args.get('category', '').strip()
-        subcategory = request.args.get('subcategory', '').strip()
-        bookkeeper = request.args.get('bookkeeper', '').strip()
+        category = request.args.getlist('category')
+        subcategory = request.args.getlist('subcategory')
+        bookkeeper = [b.strip() for b in request.args.getlist('bookkeeper') if b.strip()]
 
         sql = ("SELECT substr(tx_time,1,10) AS d, ROUND(SUM(amount),2) AS total,"
                " COUNT(*) AS cnt FROM transactions WHERE tx_time LIKE ?")
         params = [month + '-%']
         if category:
-            sql += ' AND category_id = ?'
-            params.append(int(category))
+            sql += f" AND category_id IN ({','.join('?' * len(category))})"
+            params.extend(int(c) for c in category)
         if subcategory:
-            sql += ' AND subcategory_id = ?'
-            params.append(int(subcategory))
+            sql += f" AND subcategory_id IN ({','.join('?' * len(subcategory))})"
+            params.extend(int(c) for c in subcategory)
         if bookkeeper:
-            sql += ' AND bookkeeper = ?'
-            params.append(bookkeeper)
+            sql += f" AND bookkeeper IN ({','.join('?' * len(bookkeeper))})"
+            params.extend(bookkeeper)
         sql += ' GROUP BY d'
 
         conn = get_db()
@@ -296,9 +296,9 @@ def create_app():
         d = request.args.get('date', '')
         if len(d) != 10:
             return jsonify({'error': '日期格式错误'}), 400
-        category = request.args.get('category', '').strip()
-        subcategory = request.args.get('subcategory', '').strip()
-        bookkeeper = request.args.get('bookkeeper', '').strip()
+        category = request.args.getlist('category')
+        subcategory = request.args.getlist('subcategory')
+        bookkeeper = [b.strip() for b in request.args.getlist('bookkeeper') if b.strip()]
 
         sql = ('SELECT t.*, c.name AS category_name, s.name AS subcategory_name '
                'FROM transactions t '
@@ -307,14 +307,14 @@ def create_app():
                'WHERE t.tx_time LIKE ?')
         params = [d + '%']
         if category:
-            sql += ' AND t.category_id = ?'
-            params.append(int(category))
+            sql += f' AND t.category_id IN ({",".join("?" * len(category))})'
+            params.extend(int(c) for c in category)
         if subcategory:
-            sql += ' AND t.subcategory_id = ?'
-            params.append(int(subcategory))
+            sql += f' AND t.subcategory_id IN ({",".join("?" * len(subcategory))})'
+            params.extend(int(c) for c in subcategory)
         if bookkeeper:
-            sql += ' AND t.bookkeeper = ?'
-            params.append(bookkeeper)
+            sql += f' AND t.bookkeeper IN ({",".join("?" * len(bookkeeper))})'
+            params.extend(bookkeeper)
         sql += ' ORDER BY t.tx_time'
 
         conn = get_db()
@@ -328,9 +328,9 @@ def create_app():
     def api_stats():
         start = request.args.get('start', '').strip()
         end = request.args.get('end', '').strip()
-        category = request.args.get('category', '').strip()
-        subcategory = request.args.get('subcategory', '').strip()
-        bookkeeper = request.args.get('bookkeeper', '').strip()
+        category = request.args.getlist('category')
+        subcategory = request.args.getlist('subcategory')
+        bookkeeper = [b.strip() for b in request.args.getlist('bookkeeper') if b.strip()]
         where, params = '', []
         if start:
             where += ' AND tx_time >= ?'
@@ -339,14 +339,14 @@ def create_app():
             where += ' AND tx_time <= ?'
             params.append(end + '-31 23:59:59')
         if category:
-            where += ' AND category_id = ?'
-            params.append(int(category))
+            where += f' AND category_id IN ({",".join("?" * len(category))})'
+            params.extend(int(c) for c in category)
         if subcategory:
-            where += ' AND subcategory_id = ?'
-            params.append(int(subcategory))
+            where += f' AND subcategory_id IN ({",".join("?" * len(subcategory))})'
+            params.extend(int(c) for c in subcategory)
         if bookkeeper:
-            where += ' AND bookkeeper = ?'
-            params.append(bookkeeper)
+            where += f' AND bookkeeper IN ({",".join("?" * len(bookkeeper))})'
+            params.extend(bookkeeper)
         cond = ('WHERE 1=1' + where) if where else ''
         conn = get_db()
 
