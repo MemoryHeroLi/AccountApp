@@ -116,39 +116,51 @@ def create_app():
         source = request.args.get('source', '').strip()
         bookkeeper = request.args.get('bookkeeper', '').strip()
         q = request.args.get('q', '').strip()
+        try:
+            page = max(1, int(request.args.get('page', 1)))
+            per_page = min(1000, max(1, int(request.args.get('per_page', 10))))
+        except ValueError:
+            page, per_page = 1, 10
 
-        sql = ('SELECT t.*, c.name AS category_name, s.name AS subcategory_name '
-               'FROM transactions t '
-               'LEFT JOIN categories c ON c.id = t.category_id '
-               'LEFT JOIN categories s ON s.id = t.subcategory_id WHERE 1=1')
+        where = ' WHERE 1=1'
         params = []
         if month:
-            sql += " AND t.tx_time LIKE ?"
+            where += " AND t.tx_time LIKE ?"
             params.append(month + '-%')
         if category == 'none':
-            sql += ' AND t.category_id IS NULL'
+            where += ' AND t.category_id IS NULL'
         elif category:
-            sql += ' AND t.category_id = ?'
+            where += ' AND t.category_id = ?'
             params.append(int(category))
         if subcategory:
-            sql += ' AND t.subcategory_id = ?'
+            where += ' AND t.subcategory_id = ?'
             params.append(int(subcategory))
         if source:
-            sql += ' AND t.source = ?'
+            where += ' AND t.source = ?'
             params.append(source)
         if bookkeeper:
-            sql += ' AND t.bookkeeper = ?'
+            where += ' AND t.bookkeeper = ?'
             params.append(bookkeeper)
         if q:
-            sql += ' AND (t.counterparty LIKE ? OR t.description LIKE ?)'
+            where += ' AND (t.counterparty LIKE ? OR t.description LIKE ?)'
             params.extend([f'%{q}%'] * 2)
-        sql += ' ORDER BY t.tx_time DESC LIMIT 1000'
 
         conn = get_db()
-        rows = [tx_to_dict(r) for r in conn.execute(sql, params)]
-        total = round(sum(r['amount'] for r in rows), 2)
+        count, total = conn.execute(
+            f'SELECT COUNT(*), ROUND(COALESCE(SUM(amount),0),2) FROM transactions t{where}',
+            params).fetchone()
+        pages = max(1, -(-count // per_page))
+        page = min(page, pages)
+        rows = [tx_to_dict(r) for r in conn.execute(
+            'SELECT t.*, c.name AS category_name, s.name AS subcategory_name '
+            'FROM transactions t '
+            'LEFT JOIN categories c ON c.id = t.category_id '
+            'LEFT JOIN categories s ON s.id = t.subcategory_id'
+            f'{where} ORDER BY t.tx_time DESC LIMIT ? OFFSET ?',
+            params + [per_page, (page - 1) * per_page])]
         conn.close()
-        return jsonify({'transactions': rows, 'count': len(rows), 'total': total})
+        return jsonify({'transactions': rows, 'count': count, 'total': total,
+                        'page': page, 'pages': pages, 'per_page': per_page})
 
     @app.post('/api/transaction')
     def api_add_transaction():

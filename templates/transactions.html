@@ -37,6 +37,8 @@
       <tbody id="tx-body"></tbody>
     </table>
   </div>
+
+  <div class="pager" id="pager" style="display:none"></div>
 </div>
 
 <!-- 手动记账 -->
@@ -87,6 +89,10 @@
 <script>
 let CATEGORIES = [];
 let editingId = null;
+let page = 1;
+const PER_PAGE_OPTS = [10, 20, 50, 100, 200, 500, 1000];
+let perPage = Number(localStorage.getItem('txPerPage'));
+if (!PER_PAGE_OPTS.includes(perPage)) perPage = 10;
 
 const $ = id => document.getElementById(id);
 
@@ -172,6 +178,7 @@ async function loadMeta() {
       e.preventDefault();
       $('f-category').value = 'none';
       rebuildSubFilter();
+      page = 1;
       load();
     };
   } else {
@@ -185,8 +192,10 @@ async function load() {
     subcategory: $('f-subcategory').value,
     source: $('f-source').value, bookkeeper: $('f-bookkeeper').value,
     q: $('f-q').value,
+    page: page, per_page: perPage,
   });
   const data = await api('/api/transactions?' + qs);
+  page = data.page;
   $('summary').textContent = data.count ? `共 ${data.count} 笔，合计 ${money(data.total)}` : '';
   $('tx-body').innerHTML = data.transactions.map(t => `
     <tr>
@@ -203,7 +212,44 @@ async function load() {
         <button class="btn-link danger" onclick="delTx(${t.id})">删除</button>
       </td>
     </tr>`).join('') || '<tr><td colspan="10" class="text-muted" style="text-align:center;padding:30px">暂无交易，点击右上角"导入账单"开始</td></tr>';
+  renderPager(data);
 }
+
+function renderPager(data) {
+  const pager = $('pager');
+  if (data.pages <= 1) { pager.style.display = 'none'; return; }
+  // 页码窗口：首末页 + 当前页前后各 1 页，间隔过大显示省略号
+  const nums = [...new Set([1, data.pages, page - 1, page, page + 1])]
+    .filter(n => n >= 1 && n <= data.pages).sort((a, b) => a - b);
+  const parts = [];
+  nums.forEach((n, i) => {
+    if (i && n - nums[i - 1] > 1) parts.push('<span class="pg-ellipsis">…</span>');
+    parts.push(`<button class="pg-num${n === page ? ' cur' : ''}" onclick="goPage(${n})">${n}</button>`);
+  });
+  pager.style.display = 'flex';
+  pager.innerHTML =
+    `<button class="pg-btn" ${page <= 1 ? 'disabled' : ''} onclick="goPage(${page - 1})">‹ 上一页</button>` +
+    parts.join('') +
+    `<button class="pg-btn" ${page >= data.pages ? 'disabled' : ''} onclick="goPage(${page + 1})">下一页 ›</button>` +
+    `<span class="pg-info">第 <input type="number" id="f-page" min="1" max="${data.pages}" value="${page}"> / ${data.pages} 页 · 每页
+      <select id="f-perpage">${PER_PAGE_OPTS.map(o =>
+        `<option value="${o}"${o === perPage ? ' selected' : ''}>${o}</option>`).join('')}</select> 条</span>`;
+  const pageInput = $('f-page');
+  pageInput.onchange = () => {
+    const n = Math.min(data.pages, Math.max(1, Number(pageInput.value) || 1));
+    if (n !== page) goPage(n);
+    else pageInput.value = page;
+  };
+  pageInput.onkeydown = e => { if (e.key === 'Enter') pageInput.onchange(); };
+  $('f-perpage').onchange = e => {
+    perPage = Number(e.target.value);
+    localStorage.setItem('txPerPage', perPage);
+    page = 1;
+    load();
+  };
+}
+
+window.goPage = n => { page = n; load(); };
 
 window.openEdit = async id => {
   const tx = await api('/api/transaction/' + id);
@@ -227,8 +273,8 @@ window.delTx = async id => {
   loadMeta(); load();
 };
 
-$('btn-search').onclick = load;
-$('f-q').addEventListener('keydown', e => { if (e.key === 'Enter') load(); });
+$('btn-search').onclick = () => { page = 1; load(); };
+$('f-q').addEventListener('keydown', e => { if (e.key === 'Enter') { page = 1; load(); } });
 
 $('btn-import').onclick = () => $('file-import').click();
 $('file-import').onchange = async e => {

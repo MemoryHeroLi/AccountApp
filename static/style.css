@@ -102,6 +102,24 @@ th.bookkeeper, td.bookkeeper { width: 5em; white-space: nowrap; }
 .tx-table .party,
 .tx-table .goods { word-break: break-word; }
 
+/* ---- 分页条（交易明细） ---- */
+.pager { display: flex; align-items: center; gap: 6px; margin-top: 14px; flex-wrap: wrap; }
+.pager button {
+  height: 28px; min-width: 28px; padding: 0 8px;
+  border: 1px solid #d5dbe1; border-radius: 6px; background: #fff;
+  font-size: 13px; color: #2d3436; cursor: pointer;
+}
+.pager button:hover:not(:disabled):not(.cur) { background: #f0f2f4; }
+.pager button:disabled { color: #c3cbd1; background: #fafbfc; cursor: not-allowed; }
+.pager .pg-num.cur { background: #ef5350; border-color: #ef5350; color: #fff; cursor: default; }
+.pager .pg-ellipsis { color: #9aa4ab; padding: 0 2px; }
+.pager .pg-info {
+  font-size: 12px; color: #9aa4ab; margin-left: 10px;
+  display: inline-flex; align-items: center; gap: 4px;
+}
+.pager .pg-info select { height: 26px; }
+.pager .pg-info input { height: 26px; width: 52px; text-align: center; }
+
 /* ---- 徽章 ---- */
 .badge {
   display: inline-block; padding: 1px 9px; border-radius: 999px;
