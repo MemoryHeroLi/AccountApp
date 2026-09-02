@@ -84,6 +84,8 @@ label { font-size: 13px; color: #636e72; }
 }
 .msel-item:hover { background: #f5f6f8; }
 .msel-item input { accent-color: #ef5350; margin: 0; }
+.msel-all { font-weight: 600; }
+.msel-sep { height: 1px; background: #eef0f2; margin: 4px 2px; }
 
 /* ---- 表格 ---- */
 table { width: 100%; border-collapse: collapse; }

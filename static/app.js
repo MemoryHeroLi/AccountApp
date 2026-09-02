@@ -93,7 +93,14 @@ function multiSelect(el, { placeholder = '全部', onChange = null } = {}) {
     label.textContent = !chosen.length ? placeholder
       : chosen.length <= 2 ? chosen.map(c => c.label).join('、')
       : `已选 ${chosen.length} 项`;
-    panel.innerHTML = items.map(it => `
+    const allChecked = items.length > 0 && chosen.length === items.length;
+    panel.innerHTML =
+      (items.length ? `
+      <label class="msel-item msel-all">
+        <input type="checkbox" data-all="1"${allChecked ? ' checked' : ''}><span>全选</span>
+      </label>
+      <div class="msel-sep"></div>` : '') +
+      items.map(it => `
       <label class="msel-item">
         <input type="checkbox" value="${esc(it.value)}"${selected.has(String(it.value)) ? ' checked' : ''}>
         <span>${esc(it.label)}</span>
@@ -108,7 +115,10 @@ function multiSelect(el, { placeholder = '全部', onChange = null } = {}) {
     el.classList.toggle('open');
   };
   panel.onchange = e => {
-    if (e.target.checked) selected.add(e.target.value);
+    if (e.target.dataset.all) {
+      if (e.target.checked) items.forEach(it => selected.add(String(it.value)));
+      else selected.clear();
+    } else if (e.target.checked) selected.add(e.target.value);
     else selected.delete(e.target.value);
     render();
     if (onChange) onChange();
