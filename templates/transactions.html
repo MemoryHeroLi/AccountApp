@@ -124,15 +124,29 @@ function rebuildSubFilter() {
 async function loadMeta() {
   const meta = await api('/api/meta');
   CATEGORIES = meta.categories;
+
+  // 保存当前筛选值，避免重建选项后丢失“待分类”等状态
+  const monthVal = $('f-month').value;
+  const catVal = $('f-category').value;
+  const subVal = $('f-subcategory').value;
+  const bkVal = $('f-bookkeeper').value;
+
   const curMonth = new Date().toISOString().slice(0, 7);
   $('f-month').innerHTML = '<option value="">全部月份</option>' +
     meta.months.map(m => `<option value="${m}" ${m === curMonth ? 'selected' : ''}>${m}</option>`).join('');
+  if (monthVal) $('f-month').value = monthVal;
+
   $('f-category').innerHTML = '<option value="">全部类别</option><option value="none">待分类</option>' +
     topOptions(CATEGORIES);
+  if (catVal) $('f-category').value = catVal;
+
   rebuildSubFilter();
   $('f-category').onchange = rebuildSubFilter;
+  if (subVal && catVal && catVal !== 'none') $('f-subcategory').value = subVal;
+
   $('f-bookkeeper').innerHTML = '<option value="">全部记账人</option>' +
     meta.bookkeepers.map(b => `<option value="${esc(b)}">${esc(b)}</option>`).join('');
+  if (bkVal) $('f-bookkeeper').value = bkVal;
   $('import-bookkeeper').innerHTML = meta.bookkeepers.map(b =>
     `<option value="${esc(b)}">${esc(b)}</option>`).join('');
   $('import-bookkeeper').value = '旺仔爹地';
